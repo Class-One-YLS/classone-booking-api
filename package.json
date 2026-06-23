@@ -9,9 +9,9 @@
     "check": "node --check api/health.js && node --check api/state.js && node --check api/audit.js && node --check lib/db.js && node --check lib/http.js"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.10.4"
+    "@neondatabase/serverless": "latest"
   },
   "engines": {
-  "node": "20.x"
+    "node": "20.x"
   }
 }
