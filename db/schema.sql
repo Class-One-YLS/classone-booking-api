@@ -8,6 +8,32 @@ create table if not exists app_state (
   updated_by text
 );
 
+create table if not exists app_state_uploads (
+  upload_id text primary key,
+  state_key text not null,
+  expected_version bigint,
+  updated_by text,
+  total_chunks integer not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists app_state_upload_chunks (
+  upload_id text not null references app_state_uploads(upload_id) on delete cascade,
+  chunk_index integer not null,
+  chunk_data text not null,
+  created_at timestamptz not null default now(),
+  primary key (upload_id, chunk_index)
+);
+
+create table if not exists app_state_text_chunks (
+  state_key text not null,
+  version bigint not null,
+  chunk_index integer not null,
+  chunk_data text not null,
+  created_at timestamptz not null default now(),
+  primary key (state_key, version, chunk_index)
+);
+
 create table if not exists teachers (
   id text primary key,
   name text not null,
@@ -201,3 +227,4 @@ create index if not exists idx_crm_status_updated on crm_leads (status, updated_
 create index if not exists idx_tutor_status_updated on tutor_leads (status, updated_at desc);
 create index if not exists idx_replacement_status on replacement_cases (status, updated_at desc);
 create index if not exists idx_audit_created on audit_logs (created_at desc);
+create index if not exists idx_app_state_text_chunks_key_version on app_state_text_chunks (state_key, version, chunk_index);

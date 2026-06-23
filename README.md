@@ -14,6 +14,7 @@ The current safe migration plan is:
 
 - `api/health.js` - API and database health check.
 - `api/state.js` - load/save the whole app state to Neon.
+- `api/state-chunk.js` - chunked load/save for large app state.
 - `api/audit.js` - read/write audit log entries.
 - `db/schema.sql` - full Neon PostgreSQL table setup.
 - `.env.example` - environment variable template.
@@ -25,7 +26,7 @@ Add these in Vercel Project Settings > Environment Variables:
 ```text
 DATABASE_URL=your Neon connection string
 API_SECRET=your private API key
-ALLOWED_ORIGINS=https://class-one-yls.github.io,http://localhost:8766,http://localhost:8776,http://localhost:8780
+ALLOWED_ORIGINS=https://class-one-yls.github.io,http://localhost:8766,http://localhost:8776,http://localhost:8780,null
 ```
 
 Do not put `DATABASE_URL` into `index.html` or any public GitHub Pages file.
@@ -128,3 +129,17 @@ After Vercel is deployed, update the HTML app so:
 - auto-load reads `/api/state`
 - auto-save writes `/api/state`
 - audit log can read `/api/audit`
+
+## Large State Support
+
+The app uses `/api/state-chunk` when saving/loading large data. This avoids browser/Vercel request limits by splitting the app state into smaller chunks.
+
+Chunk flow:
+
+```text
+POST /api/state-chunk mode=init
+POST /api/state-chunk mode=chunk
+POST /api/state-chunk mode=complete
+GET  /api/state-chunk?key=production
+GET  /api/state-chunk?key=production&version=1&chunk=0
+```
