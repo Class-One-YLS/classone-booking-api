@@ -137,6 +137,79 @@ function findStudent(state, studentId, studentName) {
     || null;
 }
 
+function isStudentArchived(student) {
+  return !student || student.status === "archived" || student.archived === true || student.deleted === true;
+}
+
+function studentNoteId(teacherId, studentId, studentName) {
+  const key = studentId || cleanStudentName(studentName).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return `teacher_student_${teacherId}_${key || "student"}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function teacherStudentNotes(state) {
+  state.teacherStudentNotes = Array.isArray(state.teacherStudentNotes) ? state.teacherStudentNotes : [];
+  return state.teacherStudentNotes;
+}
+
+function noteForStudent(state, teacherId, studentId, studentName) {
+  const cleanName = cleanStudentName(studentName).toLowerCase();
+  return teacherStudentNotes(state).find(note =>
+    note.teacherId === teacherId &&
+    ((studentId && note.studentId === studentId) || (!studentId && cleanStudentName(note.studentName).toLowerCase() === cleanName))
+  ) || null;
+}
+
+function activeTeacherStudents(teacher, state) {
+  const rows = new Map();
+  const add = (studentId, studentName, subject = "") => {
+    const cleanName = cleanStudentName(studentName);
+    if (!cleanName) return;
+    const student = findStudent(state, studentId, cleanName);
+    if (!student || isStudentArchived(student)) return;
+    const resolvedId = student?.id || studentId || "";
+    const resolvedName = cleanStudentName(student?.name || cleanName);
+    const key = resolvedId || resolvedName.toLowerCase();
+    if (!key) return;
+    const existing = rows.get(key) || { studentId: resolvedId, studentName: resolvedName, subjects: new Set() };
+    if (subject) existing.subjects.add(subject);
+    rows.set(key, existing);
+  };
+
+  (teacher.regularSlots || []).forEach(slot => {
+    if (slot.locked && slot.studentName) add("", slot.studentName, slot.subject || "");
+  });
+  (state.students || [])
+    .filter(student => !isStudentArchived(student))
+    .forEach(student => {
+      const slots = Array.isArray(student.regularSlots)
+        ? student.regularSlots
+        : (student.day || student.time || student.teacherId ? [{ teacherId: student.teacherId || "", day: student.day || "", time: student.time || "", subject: student.subject || "" }] : []);
+      slots
+        .filter(slot => slot.teacherId === teacher.id)
+        .forEach(slot => add(student.id || "", student.name || "", slot.subject || student.subject || ""));
+    });
+
+  return [...rows.values()]
+    .map((row, index) => {
+      const note = noteForStudent(state, teacher.id, row.studentId, row.studentName);
+      return {
+        no: index + 1,
+        id: note?.id || studentNoteId(teacher.id, row.studentId, row.studentName),
+        teacherId: teacher.id,
+        studentId: row.studentId || "",
+        studentName: row.studentName,
+        subjects: [...row.subjects].filter(Boolean),
+        currentLevel: note?.currentLevel || "",
+        remark: note?.remark || "",
+        archived: false,
+        lastUpdatedAt: note?.lastUpdatedAt || "",
+        lastUpdatedBy: note?.lastUpdatedBy || ""
+      };
+    })
+    .sort((a, b) => a.studentName.localeCompare(b.studentName, "en", { sensitivity: "base" }))
+    .map((row, index) => ({ ...row, no: index + 1 }));
+}
+
 function lessonPay(teacher, state, studentId, studentName) {
   if ((teacher.category || "freelance") === "micro_franchisee") {
     const student = findStudent(state, studentId, studentName);
@@ -384,7 +457,8 @@ module.exports = async function handler(req, res) {
       regularSlots: (teacher.regularSlots || []).map(slot => publicSlot(slot, teacher, state)),
       overrideSlots: (teacher.overrideSlots || []).map(slot => publicSlot(slot, teacher, state)),
       bookings,
-      cells
+      cells,
+      students: activeTeacherStudents(teacher, state)
     });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });
