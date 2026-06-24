@@ -91,6 +91,37 @@ function dayName(dateISO) {
   return DAYS[(date.getDay() + 6) % 7];
 }
 
+function fixedSnapshotParts(booking) {
+  if ((booking && booking.source) !== "fixed_regular_snapshot") return null;
+  const match = String((booking && booking.id) || "").match(/^history_(teacher_.+?)_(\d{4}-\d{2}-\d{2})_(\d{2})_(\d{2})_/);
+  if (!match) return null;
+  return { teacherId: match[1], date: match[2], time: `${match[3]}:${match[4]}` };
+}
+
+function repairFixedSnapshotBooking(booking) {
+  const parts = fixedSnapshotParts(booking);
+  if (!parts) return booking;
+  return {
+    ...booking,
+    teacherId: booking.teacherId || parts.teacherId,
+    date: parts.date,
+    day: dayName(parts.date),
+    time: parts.time
+  };
+}
+
+function normalizeBookingsForTeacherView(bookings) {
+  const seenFixedSnapshotIds = new Set();
+  return (Array.isArray(bookings) ? bookings : [])
+    .map(booking => repairFixedSnapshotBooking(booking))
+    .filter(booking => {
+      if ((booking.source || "") !== "fixed_regular_snapshot" || !booking.id) return true;
+      if (seenFixedSnapshotIds.has(booking.id)) return false;
+      seenFixedSnapshotIds.add(booking.id);
+      return true;
+    });
+}
+
 function datesBetween(from, to) {
   const rows = [];
   if (!from || !to) return rows;
@@ -212,7 +243,7 @@ function publicCellFromSlot(slot, teacher, state) {
 }
 
 function timetableCells(teacher, state, from, to) {
-  const allBookings = uniqueBookings((Array.isArray(state.bookings) ? state.bookings : [])
+  const allBookings = uniqueBookings(normalizeBookingsForTeacherView(state.bookings)
     .filter(booking => booking.teacherId === teacher.id)
     .filter(booking => booking.status !== "deleted")
     .filter(booking => dateRangeMatches(booking.date, from, to)));
@@ -324,6 +355,7 @@ module.exports = async function handler(req, res) {
     if (!row || !row.data) return sendJson(res, 404, { ok: false, error: "Timetable data is not ready yet." });
 
     const state = row.data || {};
+    state.bookings = normalizeBookingsForTeacherView(state.bookings);
     const teacher = findTeacher(state, req);
     if (!teacher) return sendJson(res, 404, { ok: false, error: "Teacher not found." });
     if (!hasAdminApiKey(req) && !hasTeacherToken(req, teacher)) {
