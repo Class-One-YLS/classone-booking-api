@@ -1,0 +1,1125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Class One Teacher Timetable</title>
+  <style>
+    :root {
+      --mint: #72D0A1;
+      --mint-dark: #24895d;
+      --ink: #17212b;
+      --muted: #667085;
+      --line: #d7e5dd;
+      --paper: #f4fbf7;
+      --danger: #d92d20;
+      --warning: #fff2a8;
+      --new-yellow: #fff8cf;
+      --blue: #dceafe;
+      --purple: #e8dcff;
+      --grey: #d0d5dd;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { border: 0; cursor: pointer; }
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 16px clamp(14px, 4vw, 34px);
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand img { width: 142px; max-width: 36vw; height: auto; display: block; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(18px, 3vw, 26px); line-height: 1.1; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    h3 { font-size: 15px; }
+    .header-status {
+      margin-top: 4px;
+      color: var(--mint-dark);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    main {
+      width: min(1380px, 100%);
+      margin: 0 auto;
+      padding: 18px clamp(12px, 3vw, 28px) 40px;
+    }
+    .teacher-chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: #fff;
+      color: var(--mint-dark);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .sync-chip {
+      color: var(--muted);
+      background: #f8fffb;
+      font-weight: 700;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(150px, 1fr)) auto;
+      gap: 12px;
+      align-items: end;
+      margin: 16px 0;
+    }
+    .view-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 16px 0;
+    }
+    .view-tab {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 12px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 900;
+    }
+    .view-tab.active {
+      background: var(--mint);
+      border-color: var(--mint);
+      color: #0f3324;
+    }
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    select, input {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: #fff;
+      color: var(--ink);
+    }
+    textarea {
+      width: 100%;
+      min-height: 70px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: #fff;
+      color: var(--ink);
+      resize: vertical;
+      font: inherit;
+    }
+    .btn {
+      min-height: 42px;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: var(--mint);
+      color: #0f3324;
+      font-weight: 900;
+      transition: transform .12s ease, filter .12s ease;
+    }
+    .btn:active { transform: translateY(1px) scale(.98); filter: brightness(.97); }
+    .status {
+      margin: 12px 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .status.error { border-color: #f1b4ae; background: #fff3f2; color: #912018; }
+    .status.warn { border-color: #f3d28a; background: #fff8e6; color: #7a4b00; }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .metric {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .metric strong { display: block; margin-top: 8px; font-size: 26px; }
+    section {
+      margin-top: 16px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .timetable-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .teacher-timetable {
+      min-width: 1060px;
+      table-layout: fixed;
+    }
+    .month-calendar {
+      display: grid;
+      gap: 16px;
+    }
+    .month-week {
+      display: grid;
+      gap: 8px;
+    }
+    .month-week h3 {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      color: var(--mint-dark);
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #111;
+      padding: 5px 6px;
+      text-align: center;
+      vertical-align: middle;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    th {
+      background: #f59e0b;
+      color: #111;
+      font-weight: 900;
+    }
+    .time-col {
+      width: 92px;
+      background: #fff4cf;
+      font-weight: 900;
+    }
+    .cell-off {
+      background: #666;
+      color: #d8d8d8;
+      font-style: italic;
+      font-weight: 900;
+    }
+    .outside-month {
+      opacity: .48;
+    }
+    .cell-open { background: #fff; color: #98a2b3; }
+    .cell-fixed, .cell-booking {
+      background: #fff;
+      color: #111;
+      font-weight: 800;
+    }
+    .type-assessment, .type-exam, .type-trial-class { background: var(--warning); }
+    .type-new, .type-new-students { background: var(--new-yellow); }
+    .type-replacement-class { background: var(--blue); }
+    .type-extra-class { background: var(--purple); }
+    .status-completed { background: #dcf8ea; color: #111; }
+    .status-student-not-show { background: var(--danger); color: #fff; }
+    .status-cancelled, .status-public-holiday, .status-teacher-leave { background: var(--grey); color: #111; }
+    .cell-small {
+      display: block;
+      margin-top: 2px;
+      color: inherit;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 10px;
+    }
+    .class-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 11px;
+      background: #fbfefd;
+    }
+    .class-card strong { display: block; margin-bottom: 4px; font-size: 18px; line-height: 1.2; }
+    .class-time {
+      margin-top: 6px;
+      color: var(--mint-dark);
+      font-size: 16px;
+      line-height: 1.2;
+      font-weight: 900;
+    }
+    .subtle { color: var(--muted); font-size: 13px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #e8f8f0;
+      color: var(--mint-dark);
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .simple-table { min-width: 760px; }
+    .student-table { min-width: 900px; }
+    .simple-table th { background: #e8f8f0; }
+    .simple-table td, .simple-table th { border-color: var(--line); text-align: left; }
+    .hide { display: none !important; }
+    @media (max-width: 860px) {
+      .topbar { grid-template-columns: 1fr; }
+      .top-actions { justify-content: flex-start; }
+      .teacher-chip { justify-self: start; }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .toolbar .btn { grid-column: span 2; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .toolbar, .metrics { grid-template-columns: 1fr; }
+      .toolbar .btn { grid-column: auto; }
+      .brand { align-items: flex-start; flex-direction: column; }
+      section { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="classone-logo.jpeg" alt="Class One">
+      <div>
+        <h1>Teacher Timetable View</h1>
+        <p class="subtle">Read-only monthly timetable</p>
+        <p class="header-status" id="headerStatusText">Loading latest timetable...</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="teacher-chip" id="teacherChip">Loading...</div>
+      <div class="teacher-chip sync-chip" id="syncChip">Auto-sync starting</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="view-tabs">
+      <button class="view-tab active" data-view-tab="timetable">Timetable</button>
+      <button class="view-tab" data-view-tab="students">Students</button>
+    </div>
+
+    <div id="timetableView">
+    <div class="toolbar">
+      <div><label>Month</label><select id="monthSelect"></select></div>
+      <div><label>Year</label><select id="yearSelect"></select></div>
+      <button class="btn" id="refreshBtn">Refresh</button>
+    </div>
+
+    <div class="status hide" id="statusText"></div>
+
+    <div class="grid metrics">
+      <div class="metric"><span>Classes In Selected Month</span><strong id="metricTotal">0</strong></div>
+      <div class="metric"><span>Today's Remaining Classes</span><strong id="metricUpcoming">0</strong></div>
+      <div class="metric"><span>Completed / Passed</span><strong id="metricCompleted">0</strong></div>
+      <div class="metric"><span>Cancelled / Leave</span><strong id="metricCancelled">0</strong></div>
+      <div class="metric"><span>Income To Date</span><strong id="metricIncome">RM 0.00</strong></div>
+    </div>
+
+    <section>
+      <h2>Today's Classes</h2>
+      <div id="upcomingList" class="cards"></div>
+    </section>
+
+    <section id="monthCalendarSection">
+      <h2>Whole Month Calendar</h2>
+      <div id="monthCalendar" class="month-calendar"></div>
+    </section>
+
+    <section id="monthlySection">
+      <h2>Selected Month Classes</h2>
+      <div id="monthList" class="timetable-wrap"></div>
+    </section>
+
+    <section>
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <h2>Income History</h2>
+        <button class="btn ghost" id="exportIncomePdfBtn">Export Month PDF</button>
+      </div>
+      <div id="incomeList" class="timetable-wrap"></div>
+    </section>
+
+    <section>
+      <h2>Cancelled / Leave Summary</h2>
+      <div id="leaveList" class="timetable-wrap"></div>
+    </section>
+    </div>
+
+    <div id="studentsView" class="hide">
+      <section>
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+          <div>
+            <h2>Students</h2>
+            <p class="subtle">Current level and remarks auto-save to Class One database.</p>
+          </div>
+          <span class="pill" id="studentSaveStatus">Ready</span>
+        </div>
+        <div id="studentListTable" class="timetable-wrap" style="margin-top:12px;"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = "https://classone-booking-api-yiit.vercel.app";
+    const STATE_KEY = "production";
+    const AUTO_SYNC_MS = 120000;
+    const FIRST_VIEW_YEAR = 2026;
+    const FIRST_VIEW_MONTH = 5;
+    const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const STATUS_LABELS = {
+      booked: "Booked",
+      completed: "Completed",
+      student_not_show: "Student Not Show",
+      cancelled: "Cancelled",
+      public_holiday: "Public Holiday",
+      teacher_leave: "Teacher Leave"
+    };
+    const CANCELLED = ["cancelled", "public_holiday", "teacher_leave"];
+    const $ = id => document.getElementById(id);
+    const params = new URLSearchParams(window.location.search);
+    let timetableData = null;
+    let autoSyncTimer = null;
+    let autoSyncInProgress = false;
+    let lastAutoSyncAt = null;
+    let studentSaveTimer = null;
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+
+    function localISO(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+
+    function parseISODate(value) {
+      const [year, month, day] = String(value || "").split("-").map(Number);
+      return new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
+    }
+
+    function dateOffsetISO(value, days) {
+      const date = parseISODate(value);
+      date.setDate(date.getDate() + days);
+      return localISO(date);
+    }
+
+    function dateLabel(value) {
+      const date = parseISODate(value);
+      return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    }
+
+    function rawTimePart(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (text.includes("T")) {
+        const match = text.match(/T(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (match) return `${match[1].padStart(2, "0")}:${match[2]}:${match[3] || "00"}`;
+      }
+      const ampm = text.match(/\b(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(AM|PM)\b/i);
+      if (ampm) {
+        let hour = Number(ampm[1]);
+        const minute = Number(ampm[2] || 0);
+        const second = Number(ampm[3] || 0);
+        const suffix = ampm[4].toUpperCase();
+        if (suffix === "PM" && hour !== 12) hour += 12;
+        if (suffix === "AM" && hour === 12) hour = 0;
+        return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+      }
+      const match = text.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+      if (match) return `${match[1].padStart(2, "0")}:${match[2]}:${match[3] || "00"}`;
+      return "";
+    }
+
+    function normalizeTime(value) {
+      const text = String(value || "").trim();
+      const sheetDateTime = text.match(/^1899-12-\d{2}T(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+      if (sheetDateTime) {
+        let total = (Number(sheetDateTime[1]) * 60) + Number(sheetDateTime[2]) + (Number(sheetDateTime[3] || 0) / 60);
+        total -= 83 + (18 / 60);
+        total = Math.round(total / 30) * 30;
+        if (total < 0) total = 0;
+        if (total >= 24 * 60) total = (24 * 60) - 30;
+        return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+      }
+      const part = rawTimePart(value);
+      if (!part) return "";
+      const [hour, minute, second] = part.split(":").map(Number);
+      if (Number.isNaN(hour) || Number.isNaN(minute)) return "";
+      let total = (hour * 60) + minute + (Number(second || 0) >= 30 ? 1 : 0);
+      total = Math.round(total / 30) * 30;
+      if (total >= 24 * 60) total = (24 * 60) - 30;
+      return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    }
+
+    function timeLabel(value) {
+      const text = normalizeTime(value) || String(value || "");
+      const match = text.match(/^(\d{1,2}):(\d{2})/);
+      if (!match) return text;
+      const hour = Number(match[1]);
+      const minute = match[2];
+      const suffix = hour >= 12 ? "PM" : "AM";
+      const displayHour = hour % 12 || 12;
+      return `${displayHour}:${minute} ${suffix}`;
+    }
+
+    function clockLabel(date = new Date()) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function money(value) {
+      return `RM ${Number(value || 0).toFixed(2)}`;
+    }
+
+    function minutes(value) {
+      const [hour, minute] = String(value || "00:00").split(":").map(Number);
+      return (Number(hour) || 0) * 60 + (Number(minute) || 0);
+    }
+
+    function statusLabel(status) {
+      return STATUS_LABELS[status] || status || "Booked";
+    }
+
+    function statusForDisplay(booking) {
+      if (!booking) return "";
+      if ((booking.status || "booked") === "booked" && slotHasPassed(booking.date, booking.time)) return "completed";
+      return booking.status || "booked";
+    }
+
+    function statusClass(status) {
+      return `status-${String(status || "booked").replace(/_/g, "-")}`;
+    }
+
+    function typeClass(type) {
+      return `type-${String(type || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    }
+
+    function slotDateTime(date, time) {
+      return new Date(`${date}T${normalizeTime(time) || time || "00:00"}:00`);
+    }
+
+    function slotHasPassed(date, time) {
+      return slotDateTime(date, time) < new Date();
+    }
+
+    function setStatus(message, type = "") {
+      $("headerStatusText").textContent = message;
+      if (type === "error" || type === "warn") {
+        $("statusText").textContent = message;
+        $("statusText").className = `status ${type}`.trim();
+        $("statusText").classList.remove("hide");
+        return;
+      }
+      $("statusText").classList.add("hide");
+    }
+
+    function setSyncChip(message) {
+      $("syncChip").textContent = message;
+    }
+
+    function teacherLinkErrorMessage(message) {
+      if (/invalid|missing/i.test(message || "")) {
+        return "This teacher timetable link is not active yet. Please ask admin to open Teachers > Edit Teacher > Generate under Teacher Timetable View Link, wait for the Neon sync success message, then copy/share the new link.";
+      }
+      return message;
+    }
+
+    function normalizeLoadedTimetable(data) {
+      data.regularSlots = (data.regularSlots || []).map(slot => ({ ...slot, time: normalizeTime(slot.time) || slot.time }));
+      data.overrideSlots = (data.overrideSlots || []).map(slot => ({ ...slot, time: normalizeTime(slot.time) || slot.time }));
+      data.bookings = (data.bookings || []).map(booking => ({ ...booking, time: normalizeTime(booking.time) || booking.time }));
+      data.cells = (data.cells || []).map(cell => ({ ...cell, time: normalizeTime(cell.time) || cell.time }));
+      data.students = (data.students || []).map((student, index) => ({
+        ...student,
+        no: index + 1,
+        currentLevel: student.currentLevel || "",
+        remark: student.remark || ""
+      }));
+      return data;
+    }
+
+    function availableMonthsForYear(year) {
+      const startMonth = Number(year) === FIRST_VIEW_YEAR ? FIRST_VIEW_MONTH : 0;
+      return MONTHS
+        .map((month, index) => ({ month, index }))
+        .filter(item => Number(year) > FIRST_VIEW_YEAR || item.index >= startMonth);
+    }
+
+    function fillMonthSelect(year, preferredMonth = null) {
+      const months = availableMonthsForYear(year);
+      $("monthSelect").innerHTML = months.map(item => `<option value="${item.index}">${item.month}</option>`).join("");
+      const fallback = months[0]?.index ?? FIRST_VIEW_MONTH;
+      const safeMonth = months.some(item => item.index === Number(preferredMonth)) ? Number(preferredMonth) : fallback;
+      $("monthSelect").value = String(safeMonth);
+    }
+
+    function fillControls() {
+      const currentYear = new Date().getFullYear();
+      const startYear = FIRST_VIEW_YEAR;
+      const endYear = Math.max(currentYear + 4, FIRST_VIEW_YEAR + 4);
+      $("yearSelect").innerHTML = Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index).map(year => `<option value="${year}">${year}</option>`).join("");
+      const selectedMonth = Number(params.get("month") || new Date().getMonth());
+      const selectedYear = Math.max(FIRST_VIEW_YEAR, Number(params.get("year") || currentYear));
+      $("yearSelect").value = String(selectedYear);
+      fillMonthSelect(selectedYear, selectedMonth);
+    }
+
+    function mondayOf(date) {
+      const copy = new Date(date);
+      const day = (copy.getDay() + 6) % 7;
+      copy.setDate(copy.getDate() - day);
+      return copy;
+    }
+
+    function weekDates(startISO) {
+      return Array.from({ length: 7 }, (_, index) => parseISODate(dateOffsetISO(startISO, index)));
+    }
+
+    function weeksForMonth(year, month) {
+      const start = mondayOf(new Date(year, month, 1));
+      const end = mondayOf(new Date(year, month + 1, 0));
+      const weeks = [];
+      for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 7)) {
+        weeks.push(localISO(date));
+      }
+      return weeks;
+    }
+
+    function selectedMonthRange() {
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const monthStart = new Date(year, month, 1);
+      const monthEnd = new Date(year, month + 1, 0);
+      const nextWeek = parseISODate(dateOffsetISO(localISO(new Date()), 7));
+      const toDate = new Date(Math.max(monthEnd.getTime(), nextWeek.getTime()));
+      return { from: localISO(monthStart), to: localISO(toDate), month, year };
+    }
+
+    async function loadTimetable({ silent = false } = {}) {
+      const teacherId = params.get("teacherId") || params.get("teacher") || "";
+      const token = params.get("token") || "";
+      if (!teacherId || !token) {
+        setStatus("Teacher timetable link is missing. Please ask admin to generate a teacher timetable view link.", "error");
+        return;
+      }
+      const range = selectedMonthRange();
+      const url = new URL(`${API_BASE}/api/teacher-view`);
+      url.searchParams.set("key", STATE_KEY);
+      url.searchParams.set("teacherId", teacherId);
+      url.searchParams.set("token", token);
+      url.searchParams.set("from", range.from);
+      url.searchParams.set("to", range.to);
+      if (!silent) setStatus("Loading latest timetable...");
+      const response = await fetch(url.toString(), { method: "GET" });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(teacherLinkErrorMessage(data.error || `Load failed with HTTP ${response.status}`));
+      timetableData = normalizeLoadedTimetable(data);
+      $("teacherChip").textContent = data.teacher.name || "Teacher";
+      lastAutoSyncAt = new Date();
+      setSyncChip(`Auto-sync: ${clockLabel(lastAutoSyncAt)}`);
+      setStatus(`${silent ? "Auto-synced" : "Loaded latest timetable"} at ${clockLabel(lastAutoSyncAt)}.`);
+      renderAll();
+    }
+
+    async function autoSyncTimetable() {
+      if (autoSyncInProgress) return;
+      autoSyncInProgress = true;
+      setSyncChip("Auto-sync: checking...");
+      try {
+        await loadTimetable({ silent: true });
+      } catch (error) {
+        setSyncChip("Auto-sync failed");
+        setStatus(`Auto-sync failed at ${clockLabel(new Date())}. Showing last loaded timetable. ${error.message}`, "warn");
+      } finally {
+        autoSyncInProgress = false;
+      }
+    }
+
+    function startAutoSync() {
+      clearInterval(autoSyncTimer);
+      setSyncChip("Auto-sync: every 2 min");
+      autoSyncTimer = setInterval(autoSyncTimetable, AUTO_SYNC_MS);
+    }
+
+    function slotRank(slot) {
+      if (slot.unavailable) return 5;
+      if (slot.locked && slot.studentName) return 4;
+      if (slot.locked) return 3;
+      if (slot.source === "override") return 2;
+      return 1;
+    }
+
+    function uniqueSlots(slots) {
+      const byTime = new Map();
+      slots.forEach(slot => {
+        const key = `${slot.date || ""}|${slot.time || ""}`;
+        const existing = byTime.get(key);
+        if (!existing || slotRank(slot) > slotRank(existing)) byTime.set(key, slot);
+      });
+      return [...byTime.values()];
+    }
+
+    function bookingRank(booking) {
+      const status = booking.status || "booked";
+      if (CANCELLED.includes(status) || status === "student_not_show") return 5;
+      if (status === "booked") return 4;
+      if (status === "completed") return 3;
+      return 1;
+    }
+
+    function collectSlotsForDate(date) {
+      if (!timetableData) return [];
+      const dateStr = localISO(date);
+      const day = DAYS[(date.getDay() + 6) % 7];
+      const regularSlots = timetableData.regularSlots || [];
+      const overrideSlots = timetableData.overrideSlots || [];
+      const offOverrides = overrideSlots.filter(slot => slot.date === dateStr && slot.unavailable);
+      const regular = regularSlots
+        .filter(slot => slot.day === day)
+        .filter(slot => (!slot.startDate || slot.startDate <= dateStr) && (!slot.endDate || slot.endDate >= dateStr))
+        .filter(slot => !offOverrides.some(off => off.time === slot.time))
+        .map(slot => ({ ...slot, date: dateStr, source: slot.source || "regular" }));
+      const overrides = overrideSlots
+        .filter(slot => slot.date === dateStr && !slot.unavailable)
+        .map(slot => ({ ...slot, date: dateStr, source: "override" }));
+      return uniqueSlots([...regular, ...overrides]);
+    }
+
+    function scheduleCells() {
+      return (timetableData?.cells || [])
+        .filter(cell => cell.time)
+        .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`));
+    }
+
+    function findCell(dateISO, time) {
+      return scheduleCells().find(cell => cell.date === dateISO && cell.time === time);
+    }
+
+    function scheduleBookings() {
+      const byTime = new Map();
+      (timetableData?.bookings || [])
+        .filter(booking => booking.status !== "deleted")
+        .forEach(booking => {
+          const key = `${booking.date || ""}|${booking.time || ""}`;
+          const existing = byTime.get(key);
+          if (!existing || bookingRank(booking) > bookingRank(existing)) byTime.set(key, booking);
+        });
+      return [...byTime.values()];
+    }
+
+    function findBooking(dateISO, time) {
+      return scheduleBookings().find(booking => booking.date === dateISO && booking.time === time);
+    }
+
+    function weekTimes(dates) {
+      const values = new Set();
+      for (let total = 8 * 60; total <= 21 * 60 + 30; total += 30) {
+        values.add(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`);
+      }
+      dates.forEach(date => {
+        const dateISO = localISO(date);
+        const cells = scheduleCells().filter(cell => cell.date === dateISO);
+        if (cells.length) {
+          cells.forEach(cell => values.add(cell.time));
+        } else {
+          collectSlotsForDate(date).forEach(slot => values.add(slot.time));
+          scheduleBookings().filter(booking => booking.date === dateISO).forEach(booking => values.add(booking.time));
+        }
+      });
+      return [...values].sort((a, b) => minutes(a) - minutes(b));
+    }
+
+    function cellHtml(date, time, options = {}) {
+      const dateISO = localISO(date);
+      const outsideClass = options.month != null && date.getMonth() !== options.month ? " outside-month" : "";
+      const cell = findCell(dateISO, time);
+      if (cell) {
+        if (cell.kind === "open") {
+          return `<td class="cell-open${outsideClass}"><span class="cell-small">${escapeHtml(cell.subject || "Open")}</span></td>`;
+        }
+        const displayStatus = (cell.status || "booked") === "booked" && slotHasPassed(cell.date, cell.time) ? "completed" : (cell.status || "booked");
+        const statusText = displayStatus === "completed" ? (cell.type || "class") : `${statusLabel(displayStatus)} | ${cell.type || "class"}`;
+        const cellClass = cell.kind === "fixed" ? "cell-fixed" : "cell-booking";
+        return `<td class="${cellClass} ${typeClass(cell.type)} ${statusClass(displayStatus)}${outsideClass}">${escapeHtml(cell.studentName || "Class")}${cell.subject ? ` (${escapeHtml(cell.subject)})` : ""}<span class="cell-small">${escapeHtml(statusText)}</span></td>`;
+      }
+      const booking = findBooking(dateISO, time);
+      if (booking) {
+        const displayStatus = statusForDisplay(booking);
+        const detail = displayStatus === "completed" ? (booking.type || "class") : `${statusLabel(displayStatus)} | ${booking.type || "class"}`;
+        return `<td class="cell-booking ${typeClass(booking.type)} ${statusClass(displayStatus)}${outsideClass}">${escapeHtml(booking.studentName || "Class")}${booking.subject ? ` (${escapeHtml(booking.subject)})` : ""}<span class="cell-small">${escapeHtml(detail)}</span></td>`;
+      }
+      const slot = collectSlotsForDate(date).find(item => item.time === time);
+      if (slot?.locked) {
+        const completedClass = slotHasPassed(dateISO, time) ? " status-completed" : "";
+        return `<td class="cell-fixed${completedClass}${outsideClass}">${escapeHtml(slot.studentName || "Fixed Regular")}${slot.subject ? ` (${escapeHtml(slot.subject)})` : ""}<span class="cell-small">regular class</span></td>`;
+      }
+      if (slot) return `<td class="cell-open${outsideClass}"><span class="cell-small">${escapeHtml(slot.subject || "Open")}</span></td>`;
+      return `<td class="cell-off${outsideClass}">OFF</td>`;
+    }
+
+    function weekTableHtml(dates, options = {}) {
+      const times = weekTimes(dates);
+      const header = `<tr><th class="time-col">Time</th>${dates.map(date => `<th>${DAYS[(date.getDay() + 6) % 7].slice(0, 3)}<br><span>${date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span></th>`).join("")}</tr>`;
+      const rows = times.map(time => `<tr><td class="time-col">${timeLabel(time)}</td>${dates.map(date => cellHtml(date, time, options)).join("")}</tr>`).join("");
+      return `<table class="teacher-timetable"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function renderMonthCalendar() {
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const weeks = weeksForMonth(year, month);
+      $("monthCalendar").innerHTML = weeks.map((startISO, index) => {
+        const dates = weekDates(startISO);
+        return `<div class="month-week">
+          <h3><span>Week ${index + 1}</span><span>${dateLabel(localISO(dates[0]))} - ${dateLabel(localISO(dates[6]))}</span></h3>
+          <div class="timetable-wrap">${weekTableHtml(dates, { month })}</div>
+        </div>`;
+      }).join("");
+    }
+
+    function classEntries(fromISO, toISO) {
+      const cells = scheduleCells().filter(cell => cell.date >= fromISO && cell.date <= toISO && cell.kind !== "open");
+      if (cells.length) {
+        return cells.map(cell => ({ kind: "cell", date: cell.date, time: cell.time, cell }))
+          .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      }
+      const entries = [];
+      for (let dateISO = fromISO; dateISO <= toISO; dateISO = dateOffsetISO(dateISO, 1)) {
+        const date = parseISODate(dateISO);
+        const slots = collectSlotsForDate(date);
+        const bookings = scheduleBookings().filter(booking => booking.date === dateISO);
+        const occupiedTimes = new Set();
+        bookings.forEach(booking => {
+          occupiedTimes.add(booking.time);
+          entries.push({ kind: "booking", date: dateISO, time: booking.time, booking });
+        });
+        slots
+          .filter(slot => slot.locked)
+          .filter(slot => !occupiedTimes.has(slot.time))
+          .forEach(slot => entries.push({ kind: "fixed", date: dateISO, time: slot.time, slot }));
+      }
+      return entries.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+    }
+
+    function entryMeta(entry) {
+      const teacherRate = Number(timetableData?.teacher?.rate || 0);
+      const defaultPay = (value) => Number(value || 0) || teacherRate;
+      if (entry.kind === "cell") {
+        const status = (entry.cell.status || "booked") === "booked" && slotHasPassed(entry.date, entry.time) ? "completed" : (entry.cell.status || "booked");
+        return {
+          studentName: entry.cell.studentName || "Class",
+          subject: entry.cell.subject || "",
+          type: entry.cell.type || "class",
+          status,
+          remark: entry.cell.remark || "",
+          estimatedPay: defaultPay(entry.cell.estimatedPay)
+        };
+      }
+      if (entry.kind === "booking") {
+        const status = statusForDisplay(entry.booking);
+        return {
+          studentName: entry.booking.studentName || "Class",
+          subject: entry.booking.subject || "",
+          type: entry.booking.type || "class",
+          status,
+          remark: entry.booking.remark || "",
+          estimatedPay: defaultPay(entry.booking.estimatedPay)
+        };
+      }
+      return {
+        studentName: entry.slot.studentName || "Fixed Regular",
+        subject: entry.slot.subject || "",
+        type: "regular class",
+        status: slotHasPassed(entry.date, entry.time) ? "completed" : "booked",
+        remark: "",
+        estimatedPay: defaultPay(entry.slot.estimatedPay)
+      };
+    }
+
+    function incomePayForEntry(entry) {
+      const meta = entryMeta(entry);
+      if (meta.status === "student_not_show") return 5;
+      if (meta.status === "completed") return Number(meta.estimatedPay || 0);
+      return 0;
+    }
+
+    function renderUpcoming() {
+      const from = localISO(new Date());
+      const to = from;
+      const entries = classEntries(from, to).filter(entry => !CANCELLED.includes(entryMeta(entry).status) && !slotHasPassed(entry.date, entry.time));
+      $("metricUpcoming").textContent = entries.length;
+      $("upcomingList").innerHTML = entries.slice(0, 12).map(entry => {
+        const meta = entryMeta(entry);
+        return `<div class="class-card">
+          <strong>${escapeHtml(meta.studentName)} ${meta.subject ? `(${escapeHtml(meta.subject)})` : ""}</strong>
+          <div class="class-time">${timeLabel(entry.time)}</div>
+          <div class="subtle">${dateLabel(entry.date)}</div>
+          <span class="pill">${escapeHtml(meta.type)}</span>
+        </div>`;
+      }).join("") || `<div class="subtle">No remaining classes today.</div>`;
+    }
+
+    function tableHtml(headers, rows) {
+      return `<table class="simple-table"><thead><tr>${headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    }
+
+    function renderTeacherStudents() {
+      const students = timetableData?.students || [];
+      $("studentListTable").innerHTML = students.length ? `
+        <table class="simple-table student-table">
+          <thead><tr><th>No.</th><th>Student Name</th><th>Current Level</th><th>Remarks</th><th>Last Updated</th></tr></thead>
+          <tbody>
+            ${students.map((student, index) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td><strong>${escapeHtml(student.studentName || "")}</strong>${student.subjects?.length ? `<div class="subtle">${student.subjects.map(escapeHtml).join(", ")}</div>` : ""}</td>
+                <td><input data-student-note="${escapeHtml(student.id)}" data-field="currentLevel" value="${escapeHtml(student.currentLevel || "")}" placeholder="Level"></td>
+                <td><textarea data-student-note="${escapeHtml(student.id)}" data-field="remark" placeholder="Remarks">${escapeHtml(student.remark || "")}</textarea></td>
+                <td class="subtle">${escapeHtml(student.lastUpdatedAt ? dateLabel(String(student.lastUpdatedAt).slice(0, 10)) : "-")}<br>${escapeHtml(student.lastUpdatedBy || "")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      ` : `<div class="subtle" style="padding:12px;">No active students assigned to this teacher yet.</div>`;
+    }
+
+    function updateLocalStudentNote(id, field, value) {
+      const student = (timetableData?.students || []).find(item => item.id === id);
+      if (!student || !["currentLevel", "remark"].includes(field)) return;
+      student[field] = value;
+      student.lastUpdatedAt = new Date().toISOString();
+      student.lastUpdatedBy = timetableData?.teacher?.name || "Teacher";
+    }
+
+    async function saveTeacherStudents() {
+      if (!timetableData?.teacher?.id) return;
+      $("studentSaveStatus").textContent = "Saving...";
+      const token = params.get("token") || "";
+      const response = await fetch(`${API_BASE}/api/teacher-students`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: STATE_KEY,
+          teacherId: timetableData.teacher.id,
+          token,
+          records: timetableData.students || []
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || `Save failed with HTTP ${response.status}`);
+      timetableData.version = Number(data.version || timetableData.version || 0);
+      $("studentSaveStatus").textContent = `Saved ${clockLabel(new Date())}`;
+      setSyncChip(`Auto-sync: ${clockLabel(new Date())}`);
+    }
+
+    function scheduleStudentSave() {
+      clearTimeout(studentSaveTimer);
+      $("studentSaveStatus").textContent = "Editing...";
+      studentSaveTimer = setTimeout(() => {
+        saveTeacherStudents().catch(error => {
+          $("studentSaveStatus").textContent = "Save failed";
+          setStatus(`Student note save failed: ${error.message}`, "warn");
+        });
+      }, 900);
+    }
+
+    function renderMonthList() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      const entries = classEntries(from, monthEnd);
+      const rows = entries.map((entry, index) => {
+        const meta = entryMeta(entry);
+        return [
+          String(index + 1),
+          escapeHtml(dateLabel(entry.date)),
+          escapeHtml(timeLabel(entry.time)),
+          escapeHtml(meta.studentName),
+          escapeHtml(meta.subject),
+          escapeHtml(meta.type),
+          escapeHtml(statusLabel(meta.status)),
+          escapeHtml(meta.remark)
+        ];
+      });
+      $("monthList").innerHTML = rows.length ? tableHtml(["No.", "Date", "Time", "Student", "Subject", "Type", "Status", "Remark"], rows) : `<div class="subtle" style="padding:12px;">No classes in selected month.</div>`;
+      $("metricTotal").textContent = entries.length;
+      $("metricCompleted").textContent = entries.filter(entry => entryMeta(entry).status === "completed").length;
+      $("metricCancelled").textContent = entries.filter(entry => CANCELLED.includes(entryMeta(entry).status)).length;
+    }
+
+    function renderLeaveList() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      const rows = classEntries(from, monthEnd)
+        .filter(entry => CANCELLED.includes(entryMeta(entry).status) || entryMeta(entry).status === "student_not_show")
+        .map((entry, index) => {
+          const meta = entryMeta(entry);
+          return [
+            String(index + 1),
+            escapeHtml(dateLabel(entry.date)),
+            escapeHtml(timeLabel(entry.time)),
+            escapeHtml(meta.studentName),
+            escapeHtml(meta.subject),
+            escapeHtml(statusLabel(meta.status)),
+            escapeHtml(meta.remark)
+          ];
+        });
+      $("leaveList").innerHTML = rows.length ? tableHtml(["No.", "Date", "Time", "Student", "Subject", "Status", "Remark"], rows) : `<div class="subtle" style="padding:12px;">No cancelled, leave, public holiday, or not-show records in selected month.</div>`;
+    }
+
+    function renderIncomeHistory() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      const today = localISO(new Date());
+      const to = today < from ? "" : (today > monthEnd ? monthEnd : today);
+      const entries = to ? classEntries(from, to).filter(entry => incomePayForEntry(entry) > 0) : [];
+      const total = entries.reduce((sum, entry) => sum + incomePayForEntry(entry), 0);
+      $("metricIncome").textContent = money(total);
+      const rows = entries.map((entry, index) => {
+        const meta = entryMeta(entry);
+        return [
+          String(index + 1),
+          escapeHtml(dateLabel(entry.date)),
+          escapeHtml(timeLabel(entry.time)),
+          escapeHtml(meta.studentName),
+          escapeHtml(meta.subject),
+          escapeHtml(meta.type),
+          escapeHtml(statusLabel(meta.status)),
+          escapeHtml(money(incomePayForEntry(entry)))
+        ];
+      });
+      $("incomeList").innerHTML = rows.length ? tableHtml(["No.", "Date", "Time", "Student", "Subject", "Type", "Status", "Pay"], rows) : `<div class="subtle" style="padding:12px;">No income counted yet for the selected month.</div>`;
+    }
+
+    function selectedIncomeReportEntries() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      const today = localISO(new Date());
+      const to = today < from ? "" : (today > monthEnd ? monthEnd : today);
+      return to ? classEntries(from, to).filter(entry => incomePayForEntry(entry) > 0) : [];
+    }
+
+    function exportIncomePdf() {
+      if (!timetableData) return;
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const monthLabel = `${MONTHS[month]} ${year}`;
+      const teacherName = timetableData?.teacher?.name || "Teacher";
+      const entries = selectedIncomeReportEntries();
+      const completedCount = entries.filter(entry => entryMeta(entry).status === "completed").length;
+      const notShowCount = entries.filter(entry => entryMeta(entry).status === "student_not_show").length;
+      const total = entries.reduce((sum, entry) => sum + incomePayForEntry(entry), 0);
+      const rows = entries.map((entry, index) => {
+        const meta = entryMeta(entry);
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(dateLabel(entry.date))}</td>
+          <td>${escapeHtml(timeLabel(entry.time))}</td>
+          <td>${escapeHtml(meta.studentName || "")}</td>
+          <td>${escapeHtml(meta.subject || "")}</td>
+          <td>${escapeHtml(meta.type || "")}</td>
+          <td>${escapeHtml(statusLabel(meta.status))}</td>
+          <td>${escapeHtml(money(incomePayForEntry(entry)))}</td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="8">No completed or payable classes counted for this month yet.</td></tr>`;
+      const popup = window.open("", "_blank");
+      if (!popup) return alert("Please allow popups to export PDF.");
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(teacherName)} ${escapeHtml(monthLabel)} Income</title>
+        <style>
+          body { font-family: Arial, sans-serif; color:#17231f; padding:24px; }
+          h1 { margin:0 0 4px; font-size:24px; }
+          .subtle { color:#647067; margin-bottom:18px; }
+          .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:18px 0; }
+          .metric { border:1px solid #dbe8e1; border-radius:8px; padding:12px; }
+          .metric span { color:#647067; font-size:12px; font-weight:700; }
+          .metric strong { display:block; margin-top:6px; font-size:20px; }
+          table { width:100%; border-collapse:collapse; font-size:12px; }
+          th,td { border:1px solid #dbe8e1; padding:8px; text-align:left; vertical-align:top; }
+          th { background:#72D0A1; color:#17231f; }
+          @media print { button { display:none; } body { padding:0; } }
+        </style></head><body>
+        <button onclick="window.print()" style="float:right;padding:8px 12px;">Print / Save PDF</button>
+        <h1>${escapeHtml(teacherName)} - Completed Lessons & Income</h1>
+        <div class="subtle">${escapeHtml(monthLabel)} | Generated ${escapeHtml(new Date().toLocaleString())}</div>
+        <div class="metrics">
+          <div class="metric"><span>Payable Classes</span><strong>${entries.length}</strong></div>
+          <div class="metric"><span>Completed</span><strong>${completedCount}</strong></div>
+          <div class="metric"><span>Student Not Show</span><strong>${notShowCount}</strong></div>
+          <div class="metric"><span>Total Income</span><strong>${escapeHtml(money(total))}</strong></div>
+        </div>
+        <table><thead><tr><th>No.</th><th>Date</th><th>Time</th><th>Student</th><th>Subject</th><th>Type</th><th>Status</th><th>Pay</th></tr></thead><tbody>${rows}</tbody></table>
+      </body></html>`);
+      popup.document.close();
+      popup.focus();
+      setTimeout(() => popup.print(), 250);
+    }
+
+    function renderVisibility() {
+      $("monthCalendarSection").classList.remove("hide");
+      $("monthlySection").classList.remove("hide");
+    }
+
+    function renderAll() {
+      if (!timetableData) return;
+      renderMonthCalendar();
+      renderUpcoming();
+      renderMonthList();
+      renderLeaveList();
+      renderIncomeHistory();
+      renderTeacherStudents();
+      renderVisibility();
+    }
+
+    $("monthSelect").addEventListener("change", () => loadTimetable().catch(error => setStatus(error.message, "error")));
+    $("yearSelect").addEventListener("change", () => {
+      fillMonthSelect(Number($("yearSelect").value), Number($("monthSelect").value));
+      loadTimetable().catch(error => setStatus(error.message, "error"));
+    });
+    $("refreshBtn").addEventListener("click", () => loadTimetable().catch(error => setStatus(error.message, "error")));
+    $("exportIncomePdfBtn").addEventListener("click", exportIncomePdf);
+    document.querySelectorAll("[data-view-tab]").forEach(button => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-view-tab]").forEach(item => item.classList.toggle("active", item === button));
+        $("timetableView").classList.toggle("hide", button.dataset.viewTab !== "timetable");
+        $("studentsView").classList.toggle("hide", button.dataset.viewTab !== "students");
+      });
+    });
+    $("studentListTable").addEventListener("input", event => {
+      const field = event.target.dataset.field;
+      const id = event.target.dataset.studentNote;
+      if (!id || !field) return;
+      updateLocalStudentNote(id, field, event.target.value);
+      scheduleStudentSave();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) autoSyncTimetable();
+    });
+
+    fillControls();
+    loadTimetable()
+      .then(startAutoSync)
+      .catch(error => setStatus(error.message, "error"));
+  </script>
+</body>
+</html>
