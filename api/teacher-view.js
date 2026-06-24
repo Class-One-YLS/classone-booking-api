@@ -119,7 +119,7 @@ module.exports = async function handler(req, res) {
     const teacher = findTeacher(state, req);
     if (!teacher) return sendJson(res, 404, { ok: false, error: "Teacher not found." });
     if (!hasAdminApiKey(req) && !hasTeacherToken(req, teacher)) {
-      return sendJson(res, 401, { ok: false, error: "Invalid or missing teacher timetable link." });
+      return sendJson(res, 401, { ok: false, error: "Teacher timetable link is invalid or not synced yet. Ask admin to generate the teacher timetable view link again and wait for Neon sync success before sharing it." });
     }
 
     const from = dateOnly(req.query && req.query.from);
