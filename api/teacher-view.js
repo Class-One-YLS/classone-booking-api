@@ -263,19 +263,34 @@ function uniqueBookings(bookings) {
   return [...byTime.values()];
 }
 
+function slotAppliesOnDate(slot, dateISO, day) {
+  if (slot.date) return dateOnly(slot.date) === dateISO;
+  return slot.day === day &&
+    (!slot.startDate || dateOnly(slot.startDate) <= dateISO) &&
+    (!slot.endDate || dateOnly(slot.endDate) >= dateISO);
+}
+
+function latestOverridesForDate(teacher, dateISO, day) {
+  const byTime = new Map();
+  (teacher.overrideSlots || [])
+    .filter(slot => slotAppliesOnDate(slot, dateISO, day))
+    .map(slot => ({ ...slot, time: normalizeTime(slot.time) }))
+    .filter(slot => slot.time)
+    .forEach(slot => byTime.set(slot.time, slot));
+  return byTime;
+}
+
 function collectTeacherSlotsForDate(teacher, dateISO) {
   const day = dayName(dateISO);
-  const offOverrides = (teacher.overrideSlots || [])
-    .filter(slot => dateOnly(slot.date) === dateISO && slot.unavailable)
-    .map(slot => ({ ...slot, time: normalizeTime(slot.time) }));
+  const latestOverrides = latestOverridesForDate(teacher, dateISO, day);
   const regular = (teacher.regularSlots || [])
     .filter(slot => slot.day === day)
     .filter(slot => (!slot.startDate || dateOnly(slot.startDate) <= dateISO) && (!slot.endDate || dateOnly(slot.endDate) >= dateISO))
-    .filter(slot => !offOverrides.some(off => off.time && off.time === normalizeTime(slot.time)))
+    .filter(slot => !latestOverrides.has(normalizeTime(slot.time)))
     .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }));
-  const overrides = (teacher.overrideSlots || [])
-    .filter(slot => dateOnly(slot.date) === dateISO && !slot.unavailable)
-    .map(slot => ({ ...slot, date: dateISO, source: "override", time: normalizeTime(slot.time) }));
+  const overrides = [...latestOverrides.values()]
+    .filter(slot => !slot.unavailable)
+    .map(slot => ({ ...slot, date: dateISO, day, source: "override", time: normalizeTime(slot.time) }));
   return uniqueSlots([...regular, ...overrides]);
 }
 
