@@ -260,6 +260,18 @@
       padding: 11px;
       background: #fbfefd;
     }
+    .class-card.is-passed {
+      border-color: #c7cbd1;
+      background: #e5e7eb;
+      color: #111;
+    }
+    .class-card.is-passed .class-time,
+    .class-card.is-passed .subtle { color: #4b5563; }
+    .class-card.is-passed .pill { background: #cbd0d6; color: #111; }
+    .class-card.is-not-show { border-color: #b42318; background: var(--danger); color: #fff; }
+    .class-card.is-not-show .class-time,
+    .class-card.is-not-show .subtle { color: #fff; }
+    .class-card.is-not-show .pill { background: #fff; color: #b42318; }
     .class-card strong { display: block; margin-bottom: 4px; font-size: 18px; line-height: 1.2; }
     .class-time {
       margin-top: 6px;
@@ -681,6 +693,19 @@
       return [...byTime.values()];
     }
 
+    function overrideAppliesOnDate(slot, dateStr, day) {
+      if (slot.date) return slot.date === dateStr;
+      return slot.day === day && (!slot.startDate || slot.startDate <= dateStr) && (!slot.endDate || slot.endDate >= dateStr);
+    }
+
+    function latestOverridesForDate(dateStr, day) {
+      const byTime = new Map();
+      (timetableData?.overrideSlots || [])
+        .filter(slot => overrideAppliesOnDate(slot, dateStr, day))
+        .forEach(slot => byTime.set(slot.time, slot));
+      return byTime;
+    }
+
     function bookingRank(booking) {
       const status = booking.status || "booked";
       if (CANCELLED.includes(status) || status === "student_not_show") return 5;
@@ -694,16 +719,15 @@
       const dateStr = localISO(date);
       const day = DAYS[(date.getDay() + 6) % 7];
       const regularSlots = timetableData.regularSlots || [];
-      const overrideSlots = timetableData.overrideSlots || [];
-      const offOverrides = overrideSlots.filter(slot => slot.date === dateStr && slot.unavailable);
+      const latestOverrides = latestOverridesForDate(dateStr, day);
       const regular = regularSlots
         .filter(slot => slot.day === day)
         .filter(slot => (!slot.startDate || slot.startDate <= dateStr) && (!slot.endDate || slot.endDate >= dateStr))
-        .filter(slot => !offOverrides.some(off => off.time === slot.time))
+        .filter(slot => !latestOverrides.has(slot.time))
         .map(slot => ({ ...slot, date: dateStr, source: slot.source || "regular" }));
-      const overrides = overrideSlots
-        .filter(slot => slot.date === dateStr && !slot.unavailable)
-        .map(slot => ({ ...slot, date: dateStr, source: "override" }));
+      const overrides = [...latestOverrides.values()]
+        .filter(slot => !slot.unavailable)
+        .map(slot => ({ ...slot, date: dateStr, day, source: "override" }));
       return uniqueSlots([...regular, ...overrides]);
     }
 
@@ -868,17 +892,22 @@
     function renderUpcoming() {
       const from = localISO(new Date());
       const to = from;
-      const entries = classEntries(from, to).filter(entry => !CANCELLED.includes(entryMeta(entry).status) && !slotHasPassed(entry.date, entry.time));
-      $("metricUpcoming").textContent = entries.length;
-      $("upcomingList").innerHTML = entries.slice(0, 12).map(entry => {
+      const entries = classEntries(from, to)
+        .filter(entry => !CANCELLED.includes(entryMeta(entry).status))
+        .sort((a, b) => minutes(a.time) - minutes(b.time));
+      const remaining = entries.filter(entry => entryMeta(entry).status !== "completed" && !slotHasPassed(entry.date, entry.time));
+      $("metricUpcoming").textContent = remaining.length;
+      $("upcomingList").innerHTML = entries.map(entry => {
         const meta = entryMeta(entry);
-        return `<div class="class-card">
+        const passed = meta.status === "completed";
+        const notShow = meta.status === "student_not_show";
+        return `<div class="class-card${passed ? " is-passed" : ""}${notShow ? " is-not-show" : ""}">
           <strong>${escapeHtml(meta.studentName)} ${meta.subject ? `(${escapeHtml(meta.subject)})` : ""}</strong>
           <div class="class-time">${timeLabel(entry.time)}</div>
           <div class="subtle">${dateLabel(entry.date)}</div>
-          <span class="pill">${escapeHtml(meta.type)}</span>
+          <span class="pill">${escapeHtml(passed ? "Passed" : (notShow ? "Student Not Show" : meta.type))}</span>
         </div>`;
-      }).join("") || `<div class="subtle">No remaining classes today.</div>`;
+      }).join("") || `<div class="subtle">No classes today.</div>`;
     }
 
     function tableHtml(headers, rows) {
