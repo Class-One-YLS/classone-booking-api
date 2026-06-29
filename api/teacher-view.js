@@ -419,18 +419,108 @@ function hasTeacherToken(req, teacher) {
   return Boolean(saved && provided && provided === saved);
 }
 
-async function loadState(req) {
+async function loadState(req, from, to) {
   await ensureCoreTables();
   const sql = getSql();
   const key = stateKey(req);
+  const rawTeacher = String((req.query && (req.query.teacherId || req.query.teacher)) || "").trim();
+  const compactTeacher = slug(rawTeacher).replace(/-/g, "");
   const rows = await sql`
-    select key, data, version, updated_at, updated_by
-    from app_state
-    where key = ${key}
-    limit 1
+    with source as (
+      select key, data, version, updated_at, updated_by
+      from app_state
+      where key = ${key}
+      limit 1
+    ), teacher_match as (
+      select teacher.value as teacher
+      from source
+      cross join lateral jsonb_array_elements(coalesce(source.data->'teachers', '[]'::jsonb)) as teacher(value)
+      where teacher.value->>'id' = ${rawTeacher}
+         or lower(coalesce(teacher.value->>'name', '')) = lower(${rawTeacher})
+         or regexp_replace(lower(coalesce(teacher.value->>'name', '')), '[^a-z0-9]+', '', 'g') = ${compactTeacher}
+      order by case
+        when teacher.value->>'id' = ${rawTeacher} then 0
+        when lower(coalesce(teacher.value->>'name', '')) = lower(${rawTeacher}) then 1
+        else 2
+      end
+      limit 1
+    )
+    select
+      source.key,
+      source.version,
+      source.updated_at,
+      source.updated_by,
+      case
+        when left(coalesce(teacher_match.teacher->>'photo', ''), 5) = 'data:' then teacher_match.teacher - 'photo'
+        else teacher_match.teacher
+      end as teacher,
+      coalesce((
+        select jsonb_agg(booking.value)
+        from jsonb_array_elements(coalesce(source.data->'bookings', '[]'::jsonb)) as booking(value)
+        where (booking.value->>'teacherId' = teacher_match.teacher->>'id'
+          or (booking.value->>'source' = 'fixed_regular_snapshot' and booking.value->>'id' like ('history_' || (teacher_match.teacher->>'id') || '_%')))
+          and coalesce(booking.value->>'status', '') <> 'deleted'
+          and (
+            booking.value->>'source' = 'fixed_regular_snapshot'
+            or (${from} = '' or left(coalesce(booking.value->>'date', ''), 10) >= ${from})
+          )
+          and (
+            booking.value->>'source' = 'fixed_regular_snapshot'
+            or (${to} = '' or left(coalesce(booking.value->>'date', ''), 10) <= ${to})
+          )
+      ), '[]'::jsonb) as bookings,
+      coalesce((
+        select jsonb_agg(
+          case when left(coalesce(student.value->>'photo', ''), 5) = 'data:' then student.value - 'photo' else student.value end
+        )
+        from jsonb_array_elements(coalesce(source.data->'students', '[]'::jsonb)) as student(value)
+        where coalesce(student.value->>'status', '') <> 'archived'
+          and lower(coalesce(student.value->>'archived', 'false')) not in ('true', '1', 'yes')
+          and (
+            exists (
+              select 1
+              from jsonb_array_elements(coalesce(student.value->'regularSlots', '[]'::jsonb)) as student_slot(value)
+              where student_slot.value->>'teacherId' = teacher_match.teacher->>'id'
+            )
+            or exists (
+              select 1
+              from jsonb_array_elements(coalesce(teacher_match.teacher->'regularSlots', '[]'::jsonb)) as teacher_slot(value)
+              where coalesce(teacher_slot.value->>'locked', 'false') = 'true'
+                and lower(coalesce(teacher_slot.value->>'studentName', '')) = lower(coalesce(student.value->>'name', ''))
+            )
+            or exists (
+              select 1
+              from jsonb_array_elements(coalesce(source.data->'bookings', '[]'::jsonb)) as student_booking(value)
+              where student_booking.value->>'teacherId' = teacher_match.teacher->>'id'
+                and (
+                  (coalesce(student_booking.value->>'studentId', '') <> '' and student_booking.value->>'studentId' = student.value->>'id')
+                  or lower(coalesce(student_booking.value->>'studentName', '')) = lower(coalesce(student.value->>'name', ''))
+                )
+            )
+          )
+      ), '[]'::jsonb) as students,
+      coalesce((
+        select jsonb_agg(note.value)
+        from jsonb_array_elements(coalesce(source.data->'teacherStudentNotes', '[]'::jsonb)) as note(value)
+        where note.value->>'teacherId' = teacher_match.teacher->>'id'
+      ), '[]'::jsonb) as teacher_student_notes
+    from source
+    left join teacher_match on true
   `;
   if (!rows.length) return null;
-  return rows[0];
+  const row = rows[0];
+  return {
+    key: row.key,
+    version: row.version,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+    data: row.teacher ? {
+      teachers: [row.teacher],
+      bookings: Array.isArray(row.bookings) ? row.bookings : [],
+      students: Array.isArray(row.students) ? row.students : [],
+      teacherStudentNotes: Array.isArray(row.teacher_student_notes) ? row.teacher_student_notes : []
+    } : null
+  };
 }
 
 module.exports = async function handler(req, res) {
@@ -439,7 +529,9 @@ module.exports = async function handler(req, res) {
 
   try {
     if (req.method !== "GET") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
-    const row = await loadState(req);
+    const from = dateOnly(req.query && req.query.from);
+    const to = dateOnly(req.query && req.query.to);
+    const row = await loadState(req, from, to);
     if (!row || !row.data) return sendJson(res, 404, { ok: false, error: "Timetable data is not ready yet." });
 
     const state = row.data || {};
@@ -450,8 +542,6 @@ module.exports = async function handler(req, res) {
       return sendJson(res, 401, { ok: false, error: "Teacher timetable link is invalid or not synced yet. Ask admin to generate the teacher timetable view link again and wait for Neon sync success before sharing it." });
     }
 
-    const from = dateOnly(req.query && req.query.from);
-    const to = dateOnly(req.query && req.query.to);
     const bookings = (Array.isArray(state.bookings) ? state.bookings : [])
       .filter(booking => booking.teacherId === teacher.id)
       .filter(booking => booking.status !== "deleted")
