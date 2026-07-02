@@ -207,6 +207,16 @@ create table if not exists revenue_entries (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists teacher_incentive_claims (
+  state_key text not null,
+  teacher_id text not null,
+  month_key text not null,
+  claim_data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  updated_by text,
+  primary key (state_key, teacher_id, month_key)
+);
+
 create table if not exists audit_logs (
   id bigserial primary key,
   action text not null,
@@ -228,3 +238,4 @@ create index if not exists idx_tutor_status_updated on tutor_leads (status, upda
 create index if not exists idx_replacement_status on replacement_cases (status, updated_at desc);
 create index if not exists idx_audit_created on audit_logs (created_at desc);
 create index if not exists idx_app_state_text_chunks_key_version on app_state_text_chunks (state_key, version, chunk_index);
+create index if not exists idx_teacher_incentive_claims_teacher_month on teacher_incentive_claims (teacher_id, month_key);

@@ -355,6 +355,7 @@ function publicTeacher(teacher) {
     name: cleanTeacherName(teacher.name),
     subjects: Array.isArray(teacher.subjects) ? teacher.subjects : [],
     photo: teacher.photo || "",
+    email: teacher.email || "",
     status: teacher.status || "active",
     payoutMethod: (teacher.category || "freelance") === "micro_franchisee" ? "Micro Franchisee" : "Freelance Tutor",
     rate: Number(teacher.rate || 0),

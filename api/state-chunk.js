@@ -158,23 +158,57 @@ async function completeUpload(body, res) {
     }
   }
 
+  const publishedChunks = JSON.stringify(chunkRows.map(row => ({
+    chunk_index: Number(row.chunk_index),
+    chunk_data: row.chunk_data
+  })));
+  const expectedVersion = upload.expected_version == null ? null : Number(upload.expected_version);
   const savedRows = await sql`
-    insert into app_state (key, data, version, updated_by)
-    values (${upload.state_key}, ${JSON.stringify(data)}::jsonb, 1, ${upload.updated_by || "app"})
-    on conflict (key) do update
-    set data = excluded.data,
-        version = app_state.version + 1,
-        updated_at = now(),
-        updated_by = excluded.updated_by
-    returning key, version, updated_at, updated_by
-  `;
-  const saved = savedRows[0];
-  await sql`delete from app_state_text_chunks where state_key = ${upload.state_key}`;
-  for (const row of chunkRows) {
-    await sql`
+    with saved as (
+      insert into app_state (key, data, version, updated_by)
+      values (${upload.state_key}, ${JSON.stringify(data)}::jsonb, 1, ${upload.updated_by || "app"})
+      on conflict (key) do update
+      set data = excluded.data,
+          version = app_state.version + 1,
+          updated_at = now(),
+          updated_by = excluded.updated_by
+      where ${expectedVersion}::bigint is null or app_state.version = ${expectedVersion}
+      returning key, version, updated_at, updated_by
+    ),
+    removed_old_chunks as (
+      delete from app_state_text_chunks chunks
+      where chunks.state_key = ${upload.state_key}
+        and exists (select 1 from saved)
+      returning chunks.state_key
+    ),
+    inserted_chunks as (
       insert into app_state_text_chunks (state_key, version, chunk_index, chunk_data)
-      values (${upload.state_key}, ${saved.version}, ${row.chunk_index}, ${row.chunk_data})
-    `;
+      select saved.key,
+             saved.version,
+             (item ->> 'chunk_index')::integer,
+             item ->> 'chunk_data'
+      from saved
+      cross join jsonb_array_elements(${publishedChunks}::jsonb) item
+      returning chunk_index
+    )
+    select saved.key,
+           saved.version,
+           saved.updated_at,
+           saved.updated_by,
+           (select count(*)::int from inserted_chunks) as published_chunks
+    from saved
+  `;
+  if (!savedRows.length) {
+    const current = await sql`select version from app_state where key = ${upload.state_key} limit 1`;
+    return sendJson(res, 409, {
+      ok: false,
+      error: "Version conflict. Please reload latest data first.",
+      currentVersion: current.length ? Number(current[0].version || 0) : 0
+    });
+  }
+  const saved = savedRows[0];
+  if (Number(saved.published_chunks || 0) !== chunkRows.length) {
+    throw new Error(`Chunk publication failed. Published ${saved.published_chunks || 0} of ${chunkRows.length}.`);
   }
   await sql`
     insert into audit_logs (action, entity_type, entity_id, summary, after_data, created_by)
