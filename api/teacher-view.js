@@ -176,7 +176,7 @@ function activeTeacherStudents(teacher, state) {
   };
 
   (teacher.regularSlots || []).forEach(slot => {
-    if (slot.locked && slot.studentName) add("", slot.studentName, slot.subject || "");
+    if (slot.locked && !slot.reserved && slot.studentName) add("", slot.studentName, slot.subject || "");
   });
   (state.students || [])
     .filter(student => !isStudentArchived(student))
@@ -313,6 +313,23 @@ function publicCellFromBooking(booking, teacher, state) {
 }
 
 function publicCellFromSlot(slot, teacher, state) {
+  if (slot.reserved) {
+    return {
+      kind: "reserved",
+      id: slot.id || "",
+      date: dateOnly(slot.date),
+      day: slot.day || dayName(dateOnly(slot.date)),
+      time: normalizeTime(slot.time),
+      studentName: cleanStudentName(slot.reservationName || slot.studentName || ""),
+      subject: slot.subject || "",
+      type: "reserve",
+      status: "reserved",
+      locked: true,
+      source: slot.source || "teacher-overview-reservation",
+      remark: slot.remark || "",
+      estimatedPay: 0
+    };
+  }
   return {
     kind: slot.locked ? "fixed" : "open",
     id: slot.id || "",
@@ -372,12 +389,15 @@ function publicSlot(slot, teacher, state) {
     subject: slot.subject || "",
     studentName: cleanStudentName(slot.studentName || ""),
     locked: Boolean(slot.locked),
+    reserved: Boolean(slot.reserved),
+    reservationName: cleanStudentName(slot.reservationName || ""),
+    reservationExpiresAt: dateOnly(slot.reservationExpiresAt || slot.endDate || ""),
     unavailable: Boolean(slot.unavailable),
     source: slot.source || "",
     startDate: dateOnly(slot.startDate || ""),
     endDate: dateOnly(slot.endDate || ""),
     remark: slot.remark || "",
-    estimatedPay: lessonPay(teacher, state, "", slot.studentName || "")
+    estimatedPay: slot.reserved ? 0 : lessonPay(teacher, state, "", slot.studentName || "")
   };
 }
 
