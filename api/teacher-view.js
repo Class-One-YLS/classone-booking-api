@@ -244,10 +244,39 @@ function uniqueSlots(slots) {
 
 function bookingRank(booking) {
   const status = booking.status || "booked";
-  if (["cancelled", "public_holiday", "teacher_leave", "student_not_show"].includes(status)) return 5;
-  if (status === "booked") return 4;
-  if (status === "completed") return 3;
+  if (status === "booked" && booking.changedSlot) return 7;
+  if (status === "booked") return 6;
+  if (status === "completed") return 5;
+  if (status === "student_not_show") return 4;
+  if (["cancelled", "public_holiday", "teacher_leave"].includes(status)) return 2;
   return 1;
+}
+
+function amendmentTime(record) {
+  const candidates = [
+    record && record.updatedAt,
+    record && record.updated_at,
+    record && record.changedAt,
+    record && record.changedSlot && record.changedSlot.changedAt,
+    record && record.rebookedAt,
+    record && record.cancelledAt,
+    record && record.completedAt,
+    record && record.deletedAt,
+    record && record.createdAt,
+    record && record.created_at
+  ];
+  const times = candidates
+    .map(value => Date.parse(value || ""))
+    .filter(value => Number.isFinite(value));
+  return times.length ? Math.max(...times) : 0;
+}
+
+function shouldUseBooking(candidate, existing) {
+  if (!existing) return true;
+  const candidateTime = amendmentTime(candidate);
+  const existingTime = amendmentTime(existing);
+  if (candidateTime !== existingTime) return candidateTime > existingTime;
+  return bookingRank(candidate) > bookingRank(existing);
 }
 
 function uniqueBookings(bookings) {
@@ -258,7 +287,7 @@ function uniqueBookings(bookings) {
     const normalized = { ...booking, time };
     const key = `${dateOnly(normalized.date)}|${normalized.time}`;
     const existing = byTime.get(key);
-    if (!existing || bookingRank(normalized) > bookingRank(existing)) byTime.set(key, normalized);
+    if (shouldUseBooking(normalized, existing)) byTime.set(key, normalized);
   });
   return [...byTime.values()];
 }
