@@ -309,17 +309,54 @@ function latestOverridesForDate(teacher, dateISO, day) {
   return byTime;
 }
 
+function regularSlotRecency(a, b) {
+  if (Boolean(a?.locked) !== Boolean(b?.locked)) return a?.locked ? 1 : -1;
+  const startCompare = String(a?.startDate || "0000-01-01")
+    .localeCompare(String(b?.startDate || "0000-01-01"));
+  if (startCompare) return startCompare;
+  return amendmentTime(a) - amendmentTime(b);
+}
+
 function collectTeacherSlotsForDate(teacher, dateISO) {
   const day = dayName(dateISO);
   const latestOverrides = latestOverridesForDate(teacher, dateISO, day);
-  const regular = (teacher.regularSlots || [])
+
+  const regularByTime = new Map();
+
+  (teacher.regularSlots || [])
     .filter(slot => slot.day === day)
     .filter(slot => (!slot.startDate || dateOnly(slot.startDate) <= dateISO) && (!slot.endDate || dateOnly(slot.endDate) >= dateISO))
     .filter(slot => !latestOverrides.has(normalizeTime(slot.time)))
-    .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }));
+    .forEach(slot => {
+      const time = normalizeTime(slot.time);
+      if (!time) return;
+
+      const normalizedSlot = {
+        ...slot,
+        date: dateISO,
+        source: slot.source || "regular",
+        time
+      };
+
+      const current = regularByTime.get(time);
+
+      if (!current || regularSlotRecency(normalizedSlot, current) >= 0) {
+        regularByTime.set(time, normalizedSlot);
+      }
+    });
+
+  const regular = [...regularByTime.values()];
+
   const overrides = [...latestOverrides.values()]
     .filter(slot => !slot.unavailable)
-    .map(slot => ({ ...slot, date: dateISO, day, source: "override", time: normalizeTime(slot.time) }));
+    .map(slot => ({
+      ...slot,
+      date: dateISO,
+      day,
+      source: "override",
+      time: normalizeTime(slot.time)
+    }));
+
   return uniqueSlots([...regular, ...overrides]);
 }
 
@@ -377,22 +414,49 @@ function publicCellFromSlot(slot, teacher, state) {
 }
 
 function timetableCells(teacher, state, from, to) {
-  const allBookings = uniqueBookings(normalizeBookingsForTeacherView(state.bookings)
-    .filter(booking => booking.teacherId === teacher.id)
-    .filter(booking => booking.status !== "deleted")
-    .filter(booking => dateRangeMatches(booking.date, from, to)));
+  const allBookings = uniqueBookings(
+    normalizeBookingsForTeacherView(state.bookings)
+      .filter(booking => booking.teacherId === teacher.id)
+      .filter(booking => booking.status !== "deleted")
+      .filter(booking => dateRangeMatches(booking.date, from, to))
+  );
+
   const rows = [];
   datesBetween(from, to).forEach(dateISO => {
+
     const slots = collectTeacherSlotsForDate(teacher, dateISO);
-    const bookings = allBookings.filter(booking => dateOnly(booking.date) === dateISO);
+    const bookings = allBookings.filter(
+      booking => dateOnly(booking.date) === dateISO
+    );
+
+    const usedBookingIds = new Set();
     slots.forEach(slot => {
-      const booking = bookings.find(item => normalizeTime(item.time) === normalizeTime(slot.time));
-      rows.push(booking ? publicCellFromBooking(booking, teacher, state) : publicCellFromSlot(slot, teacher, state));
+      const booking = bookings.find(
+        b => normalizeTime(b.time) === normalizeTime(slot.time)
+      );
+
+      if (booking) {
+        usedBookingIds.add(booking.id);
+        rows.push(publicCellFromBooking(booking, teacher, state));
+      } else {
+        rows.push(publicCellFromSlot(slot, teacher, state));
+      }
+    });
+
+    bookings.forEach(booking => {
+      if (!usedBookingIds.has(booking.id)) {
+        rows.push(publicCellFromBooking(booking, teacher, state));
+      }
     });
   });
+
   return rows
     .filter(cell => cell.time)
-    .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`));
+    .sort((a, b) =>
+      `${a.date || ""} ${a.time || ""}`.localeCompare(
+        `${b.date || ""} ${b.time || ""}`
+      )
+    );
 }
 
 function publicTeacher(teacher) {
