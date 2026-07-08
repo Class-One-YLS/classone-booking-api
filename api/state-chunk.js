@@ -14,20 +14,41 @@ function roleByName(state, name) {
   return (state.roles || []).find(role => role && role.name === name) || null;
 }
 
+function userByEmail(state, email) {
+  const users = Array.isArray(state && state.users) ? state.users : [];
+  return users.find(item => normalizedEmail(item.email) === email && item.status !== "disabled") || null;
+}
+
 function userCanWrite(state, email) {
   const users = Array.isArray(state && state.users) ? state.users : [];
   if (!users.length) return true;
   const hasValidMaster = users.some(item => item && item.role === "master_admin" && item.status !== "disabled" && normalizedEmail(item.email));
   if (!hasValidMaster && email === "master@classone.local") return true;
-  const user = users.find(item => normalizedEmail(item.email) === email && item.status !== "disabled");
+  const user = userByEmail(state, email);
   if (!user) return false;
   if (user.role === "master_admin") return true;
   const role = roleByName(state, user.role);
   return Array.isArray(role && role.permissions) && role.permissions.includes("save");
 }
 
-function verifiedSessionEmail(req) {
-  const token = String(req.headers["x-user-session"] || "");
+function userCanManageUsers(state, email) {
+  const users = Array.isArray(state && state.users) ? state.users : [];
+  if (!users.length && email === "master@classone.local") return true;
+  const user = userByEmail(state, email);
+  if (!user) return false;
+  if (user.role === "master_admin") return true;
+  const role = roleByName(state, user.role);
+  return Array.isArray(role && role.permissions) && role.permissions.includes("user_management");
+}
+
+function usersOrRolesChanged(current, incoming) {
+  if (!incoming || typeof incoming !== "object") return false;
+  return JSON.stringify(current.users || []) !== JSON.stringify(incoming.users || [])
+    || JSON.stringify(current.roles || []) !== JSON.stringify(incoming.roles || []);
+}
+
+function verifiedSessionEmail(req, body = {}) {
+  const token = String(req.headers["x-user-session"] || body.userSession || "");
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return "";
   const expected = crypto.createHmac("sha256", process.env.API_SECRET || "").update(payload).digest("base64url");
@@ -42,14 +63,21 @@ function verifiedSessionEmail(req) {
   }
 }
 
-async function requireWritePermission(req, res, key) {
+async function requireWritePermission(req, res, key, incomingData = null, authBody = {}) {
   const sql = getSql();
   const rows = await sql`select data from app_state where key = ${key} limit 1`;
   if (!rows.length) return true;
   const current = rows[0].data || {};
-  if (userCanWrite(current, verifiedSessionEmail(req))) return true;
-  sendJson(res, 403, { ok: false, error: "You do not have permission to save changes." });
-  return false;
+  const email = verifiedSessionEmail(req, authBody);
+  if (!userCanWrite(current, email)) {
+    sendJson(res, 403, { ok: false, error: "You do not have permission to save changes." });
+    return false;
+  }
+  if (usersOrRolesChanged(current, incomingData) && !userCanManageUsers(current, email)) {
+    sendJson(res, 403, { ok: false, error: "Only master_admin can manage users and roles." });
+    return false;
+  }
+  return true;
 }
 
 function splitText(text, chunkSize = 350000) {
@@ -126,7 +154,7 @@ async function initUpload(req, body, res) {
   const sql = getSql();
   const uploadId = crypto.randomUUID();
   const key = stateKey({}, body);
-  if (!(await requireWritePermission(req, res, key))) return;
+  if (!(await requireWritePermission(req, res, key, null, body))) return;
   const totalChunks = Number(body.totalChunks || 0);
   if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 5000) {
     return sendJson(res, 400, { ok: false, error: "Invalid totalChunks." });
@@ -149,7 +177,7 @@ async function saveUploadChunk(req, body, res) {
   if (chunk.length > 750000) return sendJson(res, 413, { ok: false, error: "Chunk is too large." });
   const uploadRows = await sql`select state_key, total_chunks from app_state_uploads where upload_id = ${uploadId} limit 1`;
   if (!uploadRows.length) return sendJson(res, 404, { ok: false, error: "Upload not found." });
-  if (!(await requireWritePermission(req, res, uploadRows[0].state_key))) return;
+  if (!(await requireWritePermission(req, res, uploadRows[0].state_key, null, body))) return;
   if (index >= Number(uploadRows[0].total_chunks || 0)) return sendJson(res, 400, { ok: false, error: "Chunk index exceeds total chunks." });
   await sql`
     insert into app_state_upload_chunks (upload_id, chunk_index, chunk_data)
@@ -175,7 +203,6 @@ async function completeUpload(req, body, res) {
   `;
   if (!uploadRows.length) return sendJson(res, 404, { ok: false, error: "Upload not found." });
   const upload = uploadRows[0];
-  if (!(await requireWritePermission(req, res, upload.state_key))) return;
   const chunkRows = await sql`
     select chunk_index, chunk_data
     from app_state_upload_chunks
@@ -198,6 +225,7 @@ async function completeUpload(req, body, res) {
   } catch (error) {
     return sendJson(res, 400, { ok: false, error: "Uploaded chunks do not contain valid JSON." });
   }
+  if (!(await requireWritePermission(req, res, upload.state_key, data, body))) return;
 
   if (upload.expected_version != null) {
     const current = await sql`select version from app_state where key = ${upload.state_key} limit 1`;

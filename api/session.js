@@ -37,7 +37,15 @@ async function login(req, res) {
   const state = rows[0]?.data || {};
   const users = Array.isArray(state.users) ? state.users : [];
   const hasValidMaster = users.some(item => item && item.role === "master_admin" && item.status !== "disabled" && String(item.email || "").trim());
-  let user = users.find(item => String(item.email || "").trim().toLowerCase() === email && item.status !== "disabled");
+  const matchedUser = users.find(item => String(item.email || "").trim().toLowerCase() === email);
+  if (matchedUser && matchedUser.status === "disabled") {
+    return sendJson(res, 403, {
+      ok: false,
+      error: "This user is disabled.",
+      debug: { attemptedEmail: email, usersCount: users.length, matchedUserFound: true }
+    });
+  }
+  let user = matchedUser && matchedUser.status !== "disabled" ? matchedUser : null;
   const bootstrapMaster = {
     id: "user_master_admin",
     name: "Master Admin",
@@ -47,14 +55,24 @@ async function login(req, res) {
   };
   const bootstrapAllowed = email === "master@classone.local" && password === "classone2026private" && (!users.length || !hasValidMaster);
   if (!user && bootstrapAllowed) user = bootstrapMaster;
-  const storedPassword = String(user && user.password || "");
+  const passwordCandidates = user ? [
+    user.password,
+    user.passwordHash,
+    user.tempPassword
+  ].map(value => String(value || "")).filter(Boolean) : [];
+  const storedPassword = passwordCandidates[0] || "";
   const defaultMasterFallback = email === "master@classone.local"
     && user
     && user.role === "master_admin"
     && password === "classone2026private"
-    && (bootstrapAllowed || !storedPassword || storedPassword === "classone2026private");
-  if (!user || (storedPassword !== password && !defaultMasterFallback)) {
-    return sendJson(res, 401, { ok: false, error: "Invalid email or password." });
+    && (bootstrapAllowed || !passwordCandidates.length || passwordCandidates.includes("classone2026private"));
+  const passwordMatches = passwordCandidates.includes(password);
+  if (!user || (!passwordMatches && !defaultMasterFallback)) {
+    return sendJson(res, 401, {
+      ok: false,
+      error: "Invalid email or password.",
+      debug: { attemptedEmail: email, usersCount: users.length, matchedUserFound: Boolean(user) }
+    });
   }
 
   return sendJson(res, 200, {
@@ -66,7 +84,8 @@ async function login(req, res) {
       email: user.email || "",
       role: user.role || "viewer",
       status: user.status || "active"
-    }
+    },
+    debug: { attemptedEmail: email, usersCount: users.length, matchedUserFound: true }
   });
 }
 
