@@ -123,7 +123,9 @@ function normalizeBookingsForTeacherView(bookings) {
 }
 
 function visibleTeacherViewBooking(booking) {
-  if (!booking || booking.status === "deleted" || booking.deleted === true) return false;
+  const status = normalizedBookingStatus(booking);
+  if (!booking || status === "deleted" || booking.deleted === true) return false;
+  if (booking.archived === true) return false;
   if ((booking.source || "") === "fixed_regular_snapshot" && booking.archived === true) return false;
   return true;
 }
@@ -248,13 +250,21 @@ function uniqueSlots(slots) {
   return [...byTime.values()];
 }
 
+const CANCELLED_STATUSES = ["cancelled", "public_holiday", "teacher_leave"];
+
+function normalizedBookingStatus(booking) {
+  return String(booking && booking.status ? booking.status : "booked").toLowerCase();
+}
+
 function bookingRank(booking) {
-  const status = booking.status || "booked";
+  const status = normalizedBookingStatus(booking);
+  if (status === "deleted" || booking?.deleted === true) return -100;
+  if (booking?.archived === true) return -90;
   if (status === "booked" && booking.changedSlot) return 7;
   if (status === "booked") return 6;
   if (status === "completed") return 5;
   if (status === "student_not_show") return 4;
-  if (["cancelled", "public_holiday", "teacher_leave"].includes(status)) return 2;
+  if (CANCELLED_STATUSES.includes(status)) return 2;
   return 1;
 }
 
@@ -282,7 +292,10 @@ function shouldUseBooking(candidate, existing) {
   const candidateTime = amendmentTime(candidate);
   const existingTime = amendmentTime(existing);
   if (candidateTime !== existingTime) return candidateTime > existingTime;
-  return bookingRank(candidate) > bookingRank(existing);
+  const candidateRank = bookingRank(candidate);
+  const existingRank = bookingRank(existing);
+  if (candidateRank !== existingRank) return candidateRank > existingRank;
+  return String(candidate.id || "") > String(existing.id || "");
 }
 
 function uniqueBookings(bookings) {
@@ -291,11 +304,45 @@ function uniqueBookings(bookings) {
     const time = normalizeTime(booking.time);
     if (!time) return;
     const normalized = { ...booking, time };
-    const key = `${dateOnly(normalized.date)}|${normalized.time}`;
+    const key = `${normalized.teacherId || ""}|${dateOnly(normalized.date)}|${normalized.time}`;
     const existing = byTime.get(key);
     if (shouldUseBooking(normalized, existing)) byTime.set(key, normalized);
   });
   return [...byTime.values()];
+}
+
+function debugTeacherViewBookingChoice(teacher, dateISO, time, matches, winner) {
+  if (dateISO !== "2026-07-09" || normalizeTime(time) !== "15:00") return;
+  if (!/chei\s*leng/i.test(String(teacher?.name || ""))) return;
+  console.info("[teacher-view booking choice]", {
+    teacherId: teacher.id,
+    teacherName: teacher.name,
+    date: dateISO,
+    time: normalizeTime(time),
+    matches: matches.map(booking => ({
+      id: booking.id,
+      studentName: booking.studentName,
+      subject: booking.subject,
+      type: booking.type,
+      status: booking.status,
+      changedSlot: Boolean(booking.changedSlot),
+      archived: Boolean(booking.archived),
+      deleted: Boolean(booking.deleted),
+      updatedAt: booking.updatedAt || booking.updated_at || "",
+      createdAt: booking.createdAt || booking.created_at || "",
+      rank: bookingRank(booking)
+    })),
+    winner: winner ? {
+      id: winner.id,
+      studentName: winner.studentName,
+      subject: winner.subject,
+      type: winner.type,
+      status: winner.status,
+      updatedAt: winner.updatedAt || winner.updated_at || "",
+      createdAt: winner.createdAt || winner.created_at || "",
+      rank: bookingRank(winner)
+    } : null
+  });
 }
 
 function slotAppliesOnDate(slot, dateISO, day) {
@@ -392,7 +439,9 @@ function timetableCells(teacher, state, from, to) {
     const slots = collectTeacherSlotsForDate(teacher, dateISO);
     const bookings = allBookings.filter(booking => dateOnly(booking.date) === dateISO);
     slots.forEach(slot => {
-      const booking = bookings.find(item => normalizeTime(item.time) === normalizeTime(slot.time));
+      const matchingBookings = bookings.filter(item => normalizeTime(item.time) === normalizeTime(slot.time));
+      const booking = matchingBookings[0] || null;
+      debugTeacherViewBookingChoice(teacher, dateISO, slot.time, matchingBookings, booking);
       rows.push(booking ? publicCellFromBooking(booking, teacher, state) : publicCellFromSlot(slot, teacher, state));
     });
   });
