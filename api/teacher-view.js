@@ -125,8 +125,6 @@ function normalizeBookingsForTeacherView(bookings) {
 function visibleTeacherViewBooking(booking) {
   const status = normalizedBookingStatus(booking);
   if (!booking || status === "deleted" || booking.deleted === true) return false;
-  if (booking.archived === true) return false;
-  if ((booking.source || "") === "fixed_regular_snapshot" && booking.archived === true) return false;
   return true;
 }
 
@@ -259,12 +257,11 @@ function normalizedBookingStatus(booking) {
 function bookingRank(booking) {
   const status = normalizedBookingStatus(booking);
   if (status === "deleted" || booking?.deleted === true) return -100;
-  if (booking?.archived === true) return -90;
-  if (status === "booked" && booking.changedSlot) return 7;
+  if (booking?.changedSlot) return 8;
+  if (status === "student_not_show") return 7;
   if (status === "booked") return 6;
   if (status === "completed") return 5;
-  if (status === "student_not_show") return 4;
-  if (CANCELLED_STATUSES.includes(status)) return 2;
+  if (CANCELLED_STATUSES.includes(status)) return 4;
   return 1;
 }
 
@@ -277,6 +274,7 @@ function amendmentTime(record) {
     record && record.rebookedAt,
     record && record.cancelledAt,
     record && record.completedAt,
+    record && record.studentNotShowAt,
     record && record.deletedAt,
     record && record.createdAt,
     record && record.created_at
@@ -312,13 +310,17 @@ function uniqueBookings(bookings) {
 }
 
 function debugTeacherViewBookingChoice(teacher, dateISO, time, matches, winner) {
-  if (dateISO !== "2026-07-09" || normalizeTime(time) !== "15:00") return;
-  if (!/chei\s*leng/i.test(String(teacher?.name || ""))) return;
+  const normalizedTime = normalizeTime(time);
+  const teacherName = String(teacher?.name || "");
+  const watchedCase =
+    (dateISO === "2026-07-09" && normalizedTime === "15:00" && /chei\s*leng/i.test(teacherName)) ||
+    (dateISO === "2026-07-01" && normalizedTime === "20:00" && /adelyn/i.test(teacherName));
+  if (!watchedCase) return;
   console.info("[teacher-view booking choice]", {
     teacherId: teacher.id,
     teacherName: teacher.name,
     date: dateISO,
-    time: normalizeTime(time),
+    time: normalizedTime,
     matches: matches.map(booking => ({
       id: booking.id,
       studentName: booking.studentName,
@@ -329,7 +331,12 @@ function debugTeacherViewBookingChoice(teacher, dateISO, time, matches, winner) 
       archived: Boolean(booking.archived),
       deleted: Boolean(booking.deleted),
       updatedAt: booking.updatedAt || booking.updated_at || "",
+      changedAt: booking.changedAt || "",
+      changedSlotAt: booking.changedSlot?.changedAt || "",
+      studentNotShowAt: booking.studentNotShowAt || "",
+      cancelledAt: booking.cancelledAt || "",
       createdAt: booking.createdAt || booking.created_at || "",
+      amendmentTime: amendmentTime(booking),
       rank: bookingRank(booking)
     })),
     winner: winner ? {
@@ -339,7 +346,12 @@ function debugTeacherViewBookingChoice(teacher, dateISO, time, matches, winner) 
       type: winner.type,
       status: winner.status,
       updatedAt: winner.updatedAt || winner.updated_at || "",
+      changedAt: winner.changedAt || "",
+      changedSlotAt: winner.changedSlot?.changedAt || "",
+      studentNotShowAt: winner.studentNotShowAt || "",
+      cancelledAt: winner.cancelledAt || "",
       createdAt: winner.createdAt || winner.created_at || "",
+      amendmentTime: amendmentTime(winner),
       rank: bookingRank(winner)
     } : null
   });
@@ -390,6 +402,14 @@ function publicCellFromBooking(booking, teacher, state) {
     status,
     minutes: Number(booking.minutes || 25),
     remark: booking.remark || "",
+    updatedAt: booking.updatedAt || booking.updated_at || "",
+    changedAt: booking.changedAt || "",
+    changedSlot: booking.changedSlot || null,
+    rebookedAt: booking.rebookedAt || "",
+    cancelledAt: booking.cancelledAt || "",
+    completedAt: booking.completedAt || "",
+    studentNotShowAt: booking.studentNotShowAt || "",
+    createdAt: booking.createdAt || booking.created_at || "",
     estimatedPay: status === "student_not_show" ? 5 : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
   };
 }
@@ -430,18 +450,21 @@ function publicCellFromSlot(slot, teacher, state) {
 }
 
 function timetableCells(teacher, state, from, to) {
-  const allBookings = uniqueBookings(normalizeBookingsForTeacherView(state.bookings)
+  const rawBookings = normalizeBookingsForTeacherView(state.bookings)
     .filter(booking => booking.teacherId === teacher.id)
     .filter(visibleTeacherViewBooking)
-    .filter(booking => dateRangeMatches(booking.date, from, to)));
+    .filter(booking => dateRangeMatches(booking.date, from, to));
+  const allBookings = uniqueBookings(rawBookings);
   const rows = [];
   datesBetween(from, to).forEach(dateISO => {
     const slots = collectTeacherSlotsForDate(teacher, dateISO);
     const bookings = allBookings.filter(booking => dateOnly(booking.date) === dateISO);
+    const rawDateBookings = rawBookings.filter(booking => dateOnly(booking.date) === dateISO);
     slots.forEach(slot => {
       const matchingBookings = bookings.filter(item => normalizeTime(item.time) === normalizeTime(slot.time));
       const booking = matchingBookings[0] || null;
-      debugTeacherViewBookingChoice(teacher, dateISO, slot.time, matchingBookings, booking);
+      const rawMatchingBookings = rawDateBookings.filter(item => normalizeTime(item.time) === normalizeTime(slot.time));
+      debugTeacherViewBookingChoice(teacher, dateISO, slot.time, rawMatchingBookings, booking);
       rows.push(booking ? publicCellFromBooking(booking, teacher, state) : publicCellFromSlot(slot, teacher, state));
     });
   });
@@ -498,6 +521,14 @@ function publicBooking(booking, teacher, state) {
     status,
     minutes: Number(booking.minutes || 25),
     remark: booking.remark || "",
+    updatedAt: booking.updatedAt || booking.updated_at || "",
+    changedAt: booking.changedAt || "",
+    changedSlot: booking.changedSlot || null,
+    rebookedAt: booking.rebookedAt || "",
+    cancelledAt: booking.cancelledAt || "",
+    completedAt: booking.completedAt || "",
+    studentNotShowAt: booking.studentNotShowAt || "",
+    createdAt: booking.createdAt || booking.created_at || "",
     estimatedPay: status === "student_not_show" ? 5 : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
   };
 }
