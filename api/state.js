@@ -1,8 +1,53 @@
+const crypto = require("node:crypto");
 const { getSql, ensureCoreTables } = require("../lib/db");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../lib/http");
 
 function stateKey(req, body) {
   return String((body && body.key) || (req.query && req.query.key) || "production").trim() || "production";
+}
+
+function normalizedEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function roleByName(state, name) {
+  return (state.roles || []).find(role => role && role.name === name) || null;
+}
+
+function userCanWrite(state, email) {
+  const users = Array.isArray(state && state.users) ? state.users : [];
+  if (!users.length) return true;
+  const user = users.find(item => normalizedEmail(item.email) === email && item.status !== "disabled");
+  if (!user) return false;
+  if (user.role === "master_admin") return true;
+  const role = roleByName(state, user.role);
+  return Array.isArray(role && role.permissions) && role.permissions.includes("save");
+}
+
+function verifiedSessionEmail(req) {
+  const token = String(req.headers["x-user-session"] || "");
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return "";
+  const expected = crypto.createHmac("sha256", process.env.API_SECRET || "").update(payload).digest("base64url");
+  if (Buffer.byteLength(signature) !== Buffer.byteLength(expected)) return "";
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return "";
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (Number(data.exp || 0) < Date.now()) return "";
+    return normalizedEmail(data.email);
+  } catch (error) {
+    return "";
+  }
+}
+
+async function requireWritePermission(req, res, key) {
+  const sql = getSql();
+  const rows = await sql`select data from app_state where key = ${key} limit 1`;
+  if (!rows.length) return true;
+  const current = rows[0].data || {};
+  if (userCanWrite(current, verifiedSessionEmail(req))) return true;
+  sendJson(res, 403, { ok: false, error: "You do not have permission to save changes." });
+  return false;
 }
 
 async function loadState(req, res) {
@@ -41,6 +86,7 @@ async function saveState(req, res) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return sendJson(res, 400, { ok: false, error: "Body must include data as an object." });
   }
+  if (!(await requireWritePermission(req, res, key))) return;
 
   if (expectedVersion != null) {
     const current = await sql`select version from app_state where key = ${key} limit 1`;

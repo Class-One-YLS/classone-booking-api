@@ -6,6 +6,50 @@ function stateKey(req, body) {
   return String((body && body.key) || (req.query && req.query.key) || "production").trim() || "production";
 }
 
+function normalizedEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function roleByName(state, name) {
+  return (state.roles || []).find(role => role && role.name === name) || null;
+}
+
+function userCanWrite(state, email) {
+  const users = Array.isArray(state && state.users) ? state.users : [];
+  if (!users.length) return true;
+  const user = users.find(item => normalizedEmail(item.email) === email && item.status !== "disabled");
+  if (!user) return false;
+  if (user.role === "master_admin") return true;
+  const role = roleByName(state, user.role);
+  return Array.isArray(role && role.permissions) && role.permissions.includes("save");
+}
+
+function verifiedSessionEmail(req) {
+  const token = String(req.headers["x-user-session"] || "");
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return "";
+  const expected = crypto.createHmac("sha256", process.env.API_SECRET || "").update(payload).digest("base64url");
+  if (Buffer.byteLength(signature) !== Buffer.byteLength(expected)) return "";
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return "";
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (Number(data.exp || 0) < Date.now()) return "";
+    return normalizedEmail(data.email);
+  } catch (error) {
+    return "";
+  }
+}
+
+async function requireWritePermission(req, res, key) {
+  const sql = getSql();
+  const rows = await sql`select data from app_state where key = ${key} limit 1`;
+  if (!rows.length) return true;
+  const current = rows[0].data || {};
+  if (userCanWrite(current, verifiedSessionEmail(req))) return true;
+  sendJson(res, 403, { ok: false, error: "You do not have permission to save changes." });
+  return false;
+}
+
 function splitText(text, chunkSize = 350000) {
   const chunks = [];
   for (let index = 0; index < text.length; index += chunkSize) {
@@ -75,11 +119,12 @@ async function getChunk(req, res) {
   return sendJson(res, 200, { ok: true, key, version, index, chunk: rows[0].chunk_data });
 }
 
-async function initUpload(body, res) {
+async function initUpload(req, body, res) {
   await ensureCoreTables();
   const sql = getSql();
   const uploadId = crypto.randomUUID();
   const key = stateKey({}, body);
+  if (!(await requireWritePermission(req, res, key))) return;
   const totalChunks = Number(body.totalChunks || 0);
   if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 5000) {
     return sendJson(res, 400, { ok: false, error: "Invalid totalChunks." });
@@ -91,7 +136,7 @@ async function initUpload(body, res) {
   return sendJson(res, 200, { ok: true, uploadId, key, totalChunks });
 }
 
-async function saveUploadChunk(body, res) {
+async function saveUploadChunk(req, body, res) {
   await ensureCoreTables();
   const sql = getSql();
   const uploadId = String(body.uploadId || "");
@@ -100,8 +145,9 @@ async function saveUploadChunk(body, res) {
   if (!uploadId) return sendJson(res, 400, { ok: false, error: "uploadId is required." });
   if (!Number.isInteger(index) || index < 0) return sendJson(res, 400, { ok: false, error: "Invalid chunk index." });
   if (chunk.length > 750000) return sendJson(res, 413, { ok: false, error: "Chunk is too large." });
-  const uploadRows = await sql`select total_chunks from app_state_uploads where upload_id = ${uploadId} limit 1`;
+  const uploadRows = await sql`select state_key, total_chunks from app_state_uploads where upload_id = ${uploadId} limit 1`;
   if (!uploadRows.length) return sendJson(res, 404, { ok: false, error: "Upload not found." });
+  if (!(await requireWritePermission(req, res, uploadRows[0].state_key))) return;
   if (index >= Number(uploadRows[0].total_chunks || 0)) return sendJson(res, 400, { ok: false, error: "Chunk index exceeds total chunks." });
   await sql`
     insert into app_state_upload_chunks (upload_id, chunk_index, chunk_data)
@@ -113,7 +159,7 @@ async function saveUploadChunk(body, res) {
   return sendJson(res, 200, { ok: true, uploadId, index });
 }
 
-async function completeUpload(body, res) {
+async function completeUpload(req, body, res) {
   await ensureCoreTables();
   const sql = getSql();
   const uploadId = String(body.uploadId || "");
@@ -127,6 +173,7 @@ async function completeUpload(body, res) {
   `;
   if (!uploadRows.length) return sendJson(res, 404, { ok: false, error: "Upload not found." });
   const upload = uploadRows[0];
+  if (!(await requireWritePermission(req, res, upload.state_key))) return;
   const chunkRows = await sql`
     select chunk_index, chunk_data
     from app_state_upload_chunks
@@ -244,9 +291,9 @@ module.exports = async function handler(req, res) {
     }
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
     const body = await readJson(req);
-    if (body.mode === "init") return await initUpload(body, res);
-    if (body.mode === "chunk") return await saveUploadChunk(body, res);
-    if (body.mode === "complete") return await completeUpload(body, res);
+    if (body.mode === "init") return await initUpload(req, body, res);
+    if (body.mode === "chunk") return await saveUploadChunk(req, body, res);
+    if (body.mode === "complete") return await completeUpload(req, body, res);
     return sendJson(res, 400, { ok: false, error: "Invalid chunk mode." });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });
