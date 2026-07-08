@@ -17,6 +17,8 @@ function roleByName(state, name) {
 function userCanWrite(state, email) {
   const users = Array.isArray(state && state.users) ? state.users : [];
   if (!users.length) return true;
+  const hasValidMaster = users.some(item => item && item.role === "master_admin" && item.status !== "disabled" && normalizedEmail(item.email));
+  if (!hasValidMaster && email === "master@classone.local") return true;
   const user = users.find(item => normalizedEmail(item.email) === email && item.status !== "disabled");
   if (!user) return false;
   if (user.role === "master_admin") return true;

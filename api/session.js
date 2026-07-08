@@ -36,9 +36,23 @@ async function login(req, res) {
   const rows = await sql`select data from app_state where key = ${key} limit 1`;
   const state = rows[0]?.data || {};
   const users = Array.isArray(state.users) ? state.users : [];
-  const user = users.find(item => String(item.email || "").trim().toLowerCase() === email && item.status !== "disabled");
+  const hasValidMaster = users.some(item => item && item.role === "master_admin" && item.status !== "disabled" && String(item.email || "").trim());
+  let user = users.find(item => String(item.email || "").trim().toLowerCase() === email && item.status !== "disabled");
+  const bootstrapMaster = {
+    id: "user_master_admin",
+    name: "Master Admin",
+    email: "master@classone.local",
+    role: "master_admin",
+    status: "active"
+  };
+  const bootstrapAllowed = email === "master@classone.local" && password === "classone2026private" && (!users.length || !hasValidMaster);
+  if (!user && bootstrapAllowed) user = bootstrapMaster;
   const storedPassword = String(user && user.password || "");
-  const defaultMasterFallback = email === "master@classone.local" && user && user.role === "master_admin" && password === "classone2026private";
+  const defaultMasterFallback = email === "master@classone.local"
+    && user
+    && user.role === "master_admin"
+    && password === "classone2026private"
+    && (bootstrapAllowed || !storedPassword || storedPassword === "classone2026private");
   if (!user || (storedPassword !== password && !defaultMasterFallback)) {
     return sendJson(res, 401, { ok: false, error: "Invalid email or password." });
   }
