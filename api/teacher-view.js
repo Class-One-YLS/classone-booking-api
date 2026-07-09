@@ -1,5 +1,9 @@
 const { getSql, ensureCoreTables } = require("../lib/db");
 const { setCors, sendJson, handleOptions, safeError } = require("../lib/http");
+const {
+  bookingAmendmentTime,
+  resolveBookingRecords
+} = require("../lib/booking-resolution");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -122,12 +126,6 @@ function normalizeBookingsForTeacherView(bookings) {
     });
 }
 
-function visibleTeacherViewBooking(booking) {
-  const status = normalizedBookingStatus(booking);
-  if (!booking || status === "deleted" || booking.deleted === true) return false;
-  return true;
-}
-
 function datesBetween(from, to) {
   const rows = [];
   if (!from || !to) return rows;
@@ -248,113 +246,67 @@ function uniqueSlots(slots) {
   return [...byTime.values()];
 }
 
-const CANCELLED_STATUSES = ["cancelled", "public_holiday", "teacher_leave"];
-
-function normalizedBookingStatus(booking) {
-  return String(booking && booking.status ? booking.status : "booked").toLowerCase();
-}
-
-function bookingRank(booking) {
-  const status = normalizedBookingStatus(booking);
-  if (status === "deleted" || booking?.deleted === true) return -100;
-  if (booking?.changedSlot) return 8;
-  if (status === "student_not_show") return 7;
-  if (status === "booked") return 6;
-  if (status === "completed") return 5;
-  if (CANCELLED_STATUSES.includes(status)) return 4;
-  return 1;
-}
-
-function amendmentTime(record) {
-  const candidates = [
-    record && record.updatedAt,
-    record && record.updated_at,
-    record && record.changedAt,
-    record && record.changedSlot && record.changedSlot.changedAt,
-    record && record.rebookedAt,
-    record && record.cancelledAt,
-    record && record.completedAt,
-    record && record.studentNotShowAt,
-    record && record.deletedAt,
-    record && record.createdAt,
-    record && record.created_at
-  ];
-  const times = candidates
-    .map(value => Date.parse(value || ""))
-    .filter(value => Number.isFinite(value));
-  return times.length ? Math.max(...times) : 0;
-}
-
-function shouldUseBooking(candidate, existing) {
-  if (!existing) return true;
-  const candidateTime = amendmentTime(candidate);
-  const existingTime = amendmentTime(existing);
-  if (candidateTime !== existingTime) return candidateTime > existingTime;
-  const candidateRank = bookingRank(candidate);
-  const existingRank = bookingRank(existing);
-  if (candidateRank !== existingRank) return candidateRank > existingRank;
-  return String(candidate.id || "") > String(existing.id || "");
+function bookingSlotKey(booking) {
+  const time = normalizeTime(booking && booking.time);
+  const date = dateOnly(booking && booking.date);
+  if (!booking || !booking.teacherId || !date || !time) return "";
+  return `${booking.teacherId}|${date}|${time}`;
 }
 
 function uniqueBookings(bookings) {
-  const byTime = new Map();
-  bookings.forEach(booking => {
-    const time = normalizeTime(booking.time);
-    if (!time) return;
-    const normalized = { ...booking, time };
-    const key = `${normalized.teacherId || ""}|${dateOnly(normalized.date)}|${normalized.time}`;
-    const existing = byTime.get(key);
-    if (shouldUseBooking(normalized, existing)) byTime.set(key, normalized);
-  });
-  return [...byTime.values()];
+  const normalized = (Array.isArray(bookings) ? bookings : [])
+    .map(booking => ({ ...booking, time: normalizeTime(booking.time), date: dateOnly(booking.date) }))
+    .filter(booking => bookingSlotKey(booking));
+  return [...resolveBookingRecords(normalized, bookingSlotKey).winners.values()];
 }
 
-function debugTeacherViewBookingChoice(teacher, dateISO, time, matches, winner) {
-  const normalizedTime = normalizeTime(time);
-  const teacherName = String(teacher?.name || "");
-  const watchedCase =
-    (dateISO === "2026-07-09" && normalizedTime === "15:00" && /chei\s*leng/i.test(teacherName)) ||
-    (dateISO === "2026-07-01" && normalizedTime === "20:00" && /adelyn/i.test(teacherName));
-  if (!watchedCase) return;
-  console.info("[teacher-view booking choice]", {
+function bookingDebugRecord(booking, selected = false, reason = "") {
+  return {
+    sourceRecordId: booking.id || "",
+    teacherId: booking.teacherId || "",
+    studentId: booking.studentId || "",
+    bookingId: booking.id || "",
+    studentName: booking.studentName || "",
+    status: booking.status || "booked",
+    classType: booking.type || "regular class",
+    createdAt: booking.createdAt || booking.created_at || "",
+    updatedAt: booking.updatedAt || booking.updated_at || "",
+    slotRevisionAt: booking.slotRevisionAt || "",
+    statusChangedAt: booking.statusChangedAt || "",
+    amendmentTime: bookingAmendmentTime(booking),
+    loadedFrom: "neon.app_state.bookings",
+    selectedWinner: selected,
+    reason
+  };
+}
+
+function debugTeacherViewBookingChoice(teacher, dateISO, time, trace, winner) {
+  if (!trace || trace.length < 2) return;
+  console.info("[teacher-view canonical booking]", {
     teacherId: teacher.id,
     teacherName: teacher.name,
     date: dateISO,
-    time: normalizedTime,
-    matches: matches.map(booking => ({
-      id: booking.id,
-      studentName: booking.studentName,
-      subject: booking.subject,
-      type: booking.type,
-      status: booking.status,
-      changedSlot: Boolean(booking.changedSlot),
-      archived: Boolean(booking.archived),
-      deleted: Boolean(booking.deleted),
-      updatedAt: booking.updatedAt || booking.updated_at || "",
-      changedAt: booking.changedAt || "",
-      changedSlotAt: booking.changedSlot?.changedAt || "",
-      studentNotShowAt: booking.studentNotShowAt || "",
-      cancelledAt: booking.cancelledAt || "",
-      createdAt: booking.createdAt || booking.created_at || "",
-      amendmentTime: amendmentTime(booking),
-      rank: bookingRank(booking)
-    })),
-    winner: winner ? {
-      id: winner.id,
-      studentName: winner.studentName,
-      subject: winner.subject,
-      type: winner.type,
-      status: winner.status,
-      updatedAt: winner.updatedAt || winner.updated_at || "",
-      changedAt: winner.changedAt || "",
-      changedSlotAt: winner.changedSlot?.changedAt || "",
-      studentNotShowAt: winner.studentNotShowAt || "",
-      cancelledAt: winner.cancelledAt || "",
-      createdAt: winner.createdAt || winner.created_at || "",
-      amendmentTime: amendmentTime(winner),
-      rank: bookingRank(winner)
-    } : null
+    time: normalizeTime(time),
+    records: trace.map(item => bookingDebugRecord(item.booking, item.booking === winner, item.reason)),
+    selectedWinner: winner ? bookingDebugRecord(winner, true, "canonical winner") : null
   });
+}
+
+function bookingResolutionDiagnostics(bookings) {
+  const normalized = (Array.isArray(bookings) ? bookings : [])
+    .map(booking => ({ ...booking, date: dateOnly(booking.date), time: normalizeTime(booking.time) }))
+    .filter(booking => bookingSlotKey(booking));
+  const resolution = resolveBookingRecords(normalized, bookingSlotKey);
+  return [...resolution.traces.entries()]
+    .filter(([, trace]) => trace.length > 1 || trace.some(item => !item.selected))
+    .map(([slotKey, trace]) => {
+      const winner = resolution.winners.get(slotKey);
+      return {
+        slotKey,
+        records: trace.map(item => bookingDebugRecord(item.booking, item.booking === winner, item.reason)),
+        selectedWinner: winner ? bookingDebugRecord(winner, true, "canonical winner") : null
+      };
+    });
 }
 
 function slotAppliesOnDate(slot, dateISO, day) {
@@ -393,6 +345,11 @@ function publicCellFromBooking(booking, teacher, state) {
   return {
     kind: "booking",
     id: booking.id,
+    bookingId: booking.id,
+    sourceRecordId: booking.id,
+    teacherId: booking.teacherId || teacher.id,
+    studentId: booking.studentId || "",
+    loadedFrom: "neon.app_state.bookings",
     date: dateOnly(booking.date),
     day: booking.day || dayName(dateOnly(booking.date)),
     time: normalizeTime(booking.time),
@@ -403,6 +360,8 @@ function publicCellFromBooking(booking, teacher, state) {
     minutes: Number(booking.minutes || 25),
     remark: booking.remark || "",
     updatedAt: booking.updatedAt || booking.updated_at || "",
+    slotRevisionAt: booking.slotRevisionAt || "",
+    statusChangedAt: booking.statusChangedAt || "",
     changedAt: booking.changedAt || "",
     changedSlot: booking.changedSlot || null,
     rebookedAt: booking.rebookedAt || "",
@@ -452,20 +411,31 @@ function publicCellFromSlot(slot, teacher, state) {
 function timetableCells(teacher, state, from, to) {
   const rawBookings = normalizeBookingsForTeacherView(state.bookings)
     .filter(booking => booking.teacherId === teacher.id)
-    .filter(visibleTeacherViewBooking)
     .filter(booking => dateRangeMatches(booking.date, from, to));
-  const allBookings = uniqueBookings(rawBookings);
+  const normalizedBookings = rawBookings
+    .map(booking => ({ ...booking, date: dateOnly(booking.date), time: normalizeTime(booking.time) }))
+    .filter(booking => bookingSlotKey(booking));
+  const resolution = resolveBookingRecords(normalizedBookings, bookingSlotKey);
   const rows = [];
   datesBetween(from, to).forEach(dateISO => {
     const slots = collectTeacherSlotsForDate(teacher, dateISO);
-    const bookings = allBookings.filter(booking => dateOnly(booking.date) === dateISO);
-    const rawDateBookings = rawBookings.filter(booking => dateOnly(booking.date) === dateISO);
-    slots.forEach(slot => {
-      const matchingBookings = bookings.filter(item => normalizeTime(item.time) === normalizeTime(slot.time));
-      const booking = matchingBookings[0] || null;
-      const rawMatchingBookings = rawDateBookings.filter(item => normalizeTime(item.time) === normalizeTime(slot.time));
-      debugTeacherViewBookingChoice(teacher, dateISO, slot.time, rawMatchingBookings, booking);
-      rows.push(booking ? publicCellFromBooking(booking, teacher, state) : publicCellFromSlot(slot, teacher, state));
+    const slotByTime = new Map(slots.map(slot => [normalizeTime(slot.time), slot]));
+    const bookingByTime = new Map();
+    resolution.winners.forEach((booking, key) => {
+      if (dateOnly(booking.date) === dateISO) bookingByTime.set(normalizeTime(booking.time), { booking, key });
+    });
+    const times = new Set([...slotByTime.keys(), ...bookingByTime.keys()]);
+    times.forEach(time => {
+      const resolved = bookingByTime.get(time);
+      const booking = resolved && resolved.booking;
+      const slot = slotByTime.get(time);
+      const trace = resolved ? resolution.traces.get(resolved.key) : [];
+      if (booking) {
+        debugTeacherViewBookingChoice(teacher, dateISO, time, trace, booking);
+        rows.push(publicCellFromBooking(booking, teacher, state));
+      } else if (slot) {
+        rows.push(publicCellFromSlot(slot, teacher, state));
+      }
     });
   });
   return rows
@@ -512,6 +482,11 @@ function publicBooking(booking, teacher, state) {
   const status = booking.status || "booked";
   return {
     id: booking.id,
+    bookingId: booking.id,
+    sourceRecordId: booking.id,
+    teacherId: booking.teacherId || teacher.id,
+    studentId: booking.studentId || "",
+    loadedFrom: "neon.app_state.bookings",
     date: dateOnly(booking.date || ""),
     day: booking.day || "",
     time: normalizeTime(booking.time),
@@ -522,6 +497,8 @@ function publicBooking(booking, teacher, state) {
     minutes: Number(booking.minutes || 25),
     remark: booking.remark || "",
     updatedAt: booking.updatedAt || booking.updated_at || "",
+    slotRevisionAt: booking.slotRevisionAt || "",
+    statusChangedAt: booking.statusChangedAt || "",
     changedAt: booking.changedAt || "",
     changedSlot: booking.changedSlot || null,
     rebookedAt: booking.rebookedAt || "",
@@ -678,13 +655,14 @@ module.exports = async function handler(req, res) {
       return sendJson(res, 401, { ok: false, error: "Teacher timetable link is invalid or not synced yet. Ask admin to generate the teacher timetable view link again and wait for Neon sync success before sharing it." });
     }
 
-    const bookings = (Array.isArray(state.bookings) ? state.bookings : [])
+    const bookingCandidates = (Array.isArray(state.bookings) ? state.bookings : [])
       .filter(booking => booking.teacherId === teacher.id)
       .map(booking => repairFixedSnapshotBooking(booking))
-      .filter(visibleTeacherViewBooking)
-      .filter(booking => dateRangeMatches(booking.date, from, to))
+      .filter(booking => dateRangeMatches(booking.date, from, to));
+    const bookings = uniqueBookings(bookingCandidates)
       .map(booking => publicBooking(booking, teacher, state));
     const cells = timetableCells(teacher, state, from, to);
+    const debug = String(req.query && req.query.debug || "") === "1";
 
     return sendJson(res, 200, {
       ok: true,
@@ -692,6 +670,8 @@ module.exports = async function handler(req, res) {
       version: Number(row.version || 0),
       updatedAt: row.updated_at,
       serverTime: new Date().toISOString(),
+      loadedFrom: "neon.app_state",
+      bookingResolution: "canonical_latest_active_revision",
       days: DAYS,
       from,
       to,
@@ -700,7 +680,8 @@ module.exports = async function handler(req, res) {
       overrideSlots: (teacher.overrideSlots || []).map(slot => publicSlot(slot, teacher, state)),
       bookings,
       cells,
-      students: activeTeacherStudents(teacher, state)
+      students: activeTeacherStudents(teacher, state),
+      ...(debug ? { bookingResolutionDiagnostics: bookingResolutionDiagnostics(bookingCandidates) } : {})
     });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });
