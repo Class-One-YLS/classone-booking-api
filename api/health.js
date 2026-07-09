@@ -12,6 +12,7 @@ module.exports = async function handler(req, res) {
   const result = {
     ok: true,
     service: "classone-booking-api",
+    release: "teacher-view-sync-2026-07-09",
     databaseConfigured: Boolean(process.env.DATABASE_URL),
     time: new Date().toISOString()
   };

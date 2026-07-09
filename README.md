@@ -14,7 +14,10 @@ The current safe migration plan is:
 
 - `api/health.js` - API and database health check.
 - `api/state.js` - load/save the whole app state to Neon.
+- `api/state-version.js` - lightweight admin synchronization check without loading state chunks.
 - `api/state-chunk.js` - chunked load/save for large app state.
+- `api/teacher-version.js` - token-protected lightweight teacher timetable change check.
+- `api/teacher-view.js` - targeted teacher/date-range timetable response; excludes unrelated state and embedded profile photos.
 - `api/audit.js` - read/write audit log entries.
 - `db/schema.sql` - full Neon PostgreSQL table setup.
 - `.env.example` - environment variable template.
@@ -26,7 +29,26 @@ Add these in Vercel Project Settings > Environment Variables:
 ```text
 DATABASE_URL=your Neon connection string
 API_SECRET=your private API key
-ALLOWED_ORIGINS=https://class-one-yls.github.io,http://localhost:8766,http://localhost:8776,http://localhost:8780,null
+ALLOWED_ORIGINS=https://class-one-yls.github.io,null
+```
+
+Local previews on `localhost` or `127.0.0.1`, using any port, are accepted automatically.
+
+## Deployment Check
+
+Deploy the whole repository, including `lib/booking-resolution.js`; deploying only
+`api/teacher-view.js` will make the Vercel function fail during startup.
+
+After deployment, open:
+
+```text
+https://your-vercel-domain.vercel.app/api/health
+```
+
+The response must include:
+
+```json
+{ "release": "teacher-view-sync-2026-07-09" }
 ```
 
 Do not put `DATABASE_URL` into `index.html` or any public GitHub Pages file.
@@ -111,6 +133,12 @@ X-API-Key: your private API key
 ```
 
 Returns latest audit rows.
+
+### Lightweight synchronization
+
+The admin app polls `GET /api/state-version` with `X-API-Key`. Teacher links poll `GET /api/teacher-version` with their teacher ID and link token. Full timetable data is fetched only when the returned version changes.
+
+Teacher timetable requests use `GET /api/teacher-view?teacherId=...&token=...&from=YYYY-MM-DD&to=YYYY-MM-DD`. The database filters the JSON state before returning it, so one teacher link does not download every teacher, CRM record, photo, or booking.
 
 ## Local Check
 
