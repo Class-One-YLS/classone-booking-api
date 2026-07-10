@@ -225,6 +225,18 @@ function lessonPay(teacher, state, studentId, studentName) {
   return Number(teacher.rate || 0);
 }
 
+function activePolicyRule(state, date = "") {
+  return [...(state.policyRules || [])]
+    .filter(rule => rule.status !== "archived" && (!date || !rule.effectiveFrom || rule.effectiveFrom <= date))
+    .sort((a, b) => String(b.effectiveFrom || "").localeCompare(String(a.effectiveFrom || "")) || Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))[0] || {
+      notShowAllowance: 5
+    };
+}
+
+function notShowAllowance(state, date = "") {
+  return Number(activePolicyRule(state, date).notShowAllowance ?? 5);
+}
+
 function slotRank(slot) {
   if (slot.unavailable) return 5;
   if (slot.locked && slot.studentName) return 4;
@@ -369,7 +381,7 @@ function publicCellFromBooking(booking, teacher, state) {
     completedAt: booking.completedAt || "",
     studentNotShowAt: booking.studentNotShowAt || "",
     createdAt: booking.createdAt || booking.created_at || "",
-    estimatedPay: status === "student_not_show" ? 5 : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
+    estimatedPay: status === "student_not_show" ? notShowAllowance(state, dateOnly(booking.date)) : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
   };
 }
 
@@ -506,7 +518,7 @@ function publicBooking(booking, teacher, state) {
     completedAt: booking.completedAt || "",
     studentNotShowAt: booking.studentNotShowAt || "",
     createdAt: booking.createdAt || booking.created_at || "",
-    estimatedPay: status === "student_not_show" ? 5 : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
+    estimatedPay: status === "student_not_show" ? notShowAllowance(state, dateOnly(booking.date)) : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
   };
 }
 
