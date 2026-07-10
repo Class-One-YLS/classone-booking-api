@@ -2,6 +2,7 @@ const { getSql, ensureCoreTables } = require("../lib/db");
 const { setCors, sendJson, handleOptions, safeError } = require("../lib/http");
 const {
   bookingAmendmentTime,
+  isDeletedBooking,
   resolveBookingRecords
 } = require("../lib/booking-resolution");
 
@@ -354,23 +355,31 @@ function collectTeacherSlotsForDate(teacher, dateISO) {
 
 function publicCellFromBooking(booking, teacher, state) {
   const status = booking.status || "booked";
+  const date = dateOnly(booking.date);
+  const time = normalizeTime(booking.time);
   return {
+    cellKey: `${booking.teacherId || teacher.id}|${date}|${time}`,
     kind: "booking",
     id: booking.id,
     bookingId: booking.id,
     sourceRecordId: booking.id,
     teacherId: booking.teacherId || teacher.id,
+    teacherName: teacher.name || "",
+    slotId: booking.sourceSlotId || "",
     studentId: booking.studentId || "",
     loadedFrom: "neon.app_state.bookings",
-    date: dateOnly(booking.date),
-    day: booking.day || dayName(dateOnly(booking.date)),
-    time: normalizeTime(booking.time),
+    date,
+    day: booking.day || dayName(date),
+    time,
     studentName: cleanStudentName(booking.studentName || ""),
     subject: booking.subject || "",
     type: booking.type || "regular class",
     status,
     minutes: Number(booking.minutes || 25),
     remark: booking.remark || "",
+    locked: true,
+    available: false,
+    source: booking.source || "booking",
     updatedAt: booking.updatedAt || booking.updated_at || "",
     slotRevisionAt: booking.slotRevisionAt || "",
     statusChangedAt: booking.statusChangedAt || "",
@@ -381,46 +390,80 @@ function publicCellFromBooking(booking, teacher, state) {
     completedAt: booking.completedAt || "",
     studentNotShowAt: booking.studentNotShowAt || "",
     createdAt: booking.createdAt || booking.created_at || "",
+    resolvedAt: new Date().toISOString(),
     estimatedPay: status === "student_not_show" ? notShowAllowance(state, dateOnly(booking.date)) : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
   };
 }
 
 function publicCellFromSlot(slot, teacher, state) {
   if (slot.reserved) {
+    const date = dateOnly(slot.date);
+    const time = normalizeTime(slot.time);
     return {
+      cellKey: `${teacher.id}|${date}|${time}`,
       kind: "reserved",
       id: slot.id || "",
-      date: dateOnly(slot.date),
-      day: slot.day || dayName(dateOnly(slot.date)),
-      time: normalizeTime(slot.time),
+      bookingId: "",
+      slotId: slot.id || "",
+      sourceRecordId: slot.id || "",
+      teacherId: teacher.id,
+      teacherName: teacher.name || "",
+      date,
+      day: slot.day || dayName(date),
+      time,
+      studentId: slot.studentId || "",
       studentName: cleanStudentName(slot.reservationName || slot.studentName || ""),
       subject: slot.subject || "",
       type: "reserve",
       status: "reserved",
       locked: true,
+      available: false,
       source: slot.source || "teacher-overview-reservation",
+      sourceRecordId: slot.id || "",
       remark: slot.remark || "",
+      minutes: 25,
+      resolvedAt: new Date().toISOString(),
       estimatedPay: 0
     };
   }
+  const date = dateOnly(slot.date);
+  const time = normalizeTime(slot.time);
   return {
+    cellKey: `${teacher.id}|${date}|${time}`,
     kind: slot.locked ? "fixed" : "open",
     id: slot.id || "",
-    date: dateOnly(slot.date),
-    day: slot.day || dayName(dateOnly(slot.date)),
-    time: normalizeTime(slot.time),
+    bookingId: "",
+    slotId: slot.id || "",
+    sourceRecordId: slot.id || "",
+    teacherId: teacher.id,
+    teacherName: teacher.name,
+    date,
+    day: slot.day || dayName(date),
+    time,
+    studentId: slot.studentId || "",
     studentName: cleanStudentName(slot.studentName || ""),
     subject: slot.subject || "",
     type: slot.locked ? "regular class" : "open slot",
-    status: "booked",
+    status: slot.locked ? "booked" : "available",
     locked: Boolean(slot.locked),
+    available: !slot.locked,
+    minutes: 25,
     source: slot.source || "",
     remark: slot.remark || "",
+    createdAt: slot.createdAt || "",
+    updatedAt: slot.updatedAt || slot.slotRevisionAt || "",
+    resolvedAt: new Date().toISOString(),
     estimatedPay: slot.locked ? lessonPay(teacher, state, "", slot.studentName || "") : 0
   };
 }
 
-function timetableCells(teacher, state, from, to) {
+function resolveTeacherCalendar(state, options = {}) {
+  const teacher = options.teacher || findTeacher(state, { query: { teacherId: options.teacherId } });
+  const from = dateOnly(options.from);
+  const to = dateOnly(options.to);
+  if (!teacher || !from || !to) {
+    return { teacherId: options.teacherId || "", from, to, generatedAt: new Date().toISOString(), stateVersion: Number(options.stateVersion || 0), cells: [] };
+  }
   const rawBookings = normalizeBookingsForTeacherView(state.bookings)
     .filter(booking => booking.teacherId === teacher.id)
     .filter(booking => dateRangeMatches(booking.date, from, to));
@@ -444,15 +487,26 @@ function timetableCells(teacher, state, from, to) {
       const trace = resolved ? resolution.traces.get(resolved.key) : [];
       if (booking) {
         debugTeacherViewBookingChoice(teacher, dateISO, time, trace, booking);
+        if (isDeletedBooking(booking)) {
+          if (slot && !slot.locked && !slot.reserved) rows.push(publicCellFromSlot(slot, teacher, state));
+          return;
+        }
         rows.push(publicCellFromBooking(booking, teacher, state));
       } else if (slot) {
         rows.push(publicCellFromSlot(slot, teacher, state));
       }
     });
   });
-  return rows
-    .filter(cell => cell.time)
-    .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`));
+  return {
+    teacherId: teacher.id,
+    from,
+    to,
+    generatedAt: new Date().toISOString(),
+    stateVersion: Number(options.stateVersion || 0),
+    cells: rows
+      .filter(cell => cell.time)
+      .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`))
+  };
 }
 
 function publicTeacher(teacher) {
@@ -672,8 +726,10 @@ module.exports = async function handler(req, res) {
       .map(booking => repairFixedSnapshotBooking(booking))
       .filter(booking => dateRangeMatches(booking.date, from, to));
     const bookings = uniqueBookings(bookingCandidates)
+      .filter(booking => !isDeletedBooking(booking))
       .map(booking => publicBooking(booking, teacher, state));
-    const cells = timetableCells(teacher, state, from, to);
+    const resolvedCalendar = resolveTeacherCalendar(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
+    const cells = resolvedCalendar.cells;
     const debug = String(req.query && req.query.debug || "") === "1";
 
     return sendJson(res, 200, {
@@ -683,7 +739,8 @@ module.exports = async function handler(req, res) {
       updatedAt: row.updated_at,
       serverTime: new Date().toISOString(),
       loadedFrom: "neon.app_state",
-      bookingResolution: "canonical_latest_active_revision",
+      bookingResolution: "canonical_resolved_calendar",
+      resolvedCalendar,
       days: DAYS,
       from,
       to,
