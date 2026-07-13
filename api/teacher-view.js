@@ -329,17 +329,22 @@ function slotAppliesOnDate(slot, dateISO, day) {
     (!slot.endDate || dateOnly(slot.endDate) >= dateISO);
 }
 
+function teacherDateTimeKey(teacherId, dateISO, time) {
+  return `${teacherId || ""}|${dateOnly(dateISO)}|${normalizeTime(time) || time || ""}`;
+}
+
 function latestOverridesForDate(teacher, dateISO, day) {
-  const byTime = new Map();
+  const byCell = new Map();
   (teacher.overrideSlots || [])
     .filter(slot => slotAppliesOnDate(slot, dateISO, day))
     .map(slot => ({ ...slot, time: normalizeTime(slot.time) }))
     .filter(slot => slot.time)
     .forEach(slot => {
-      const existing = byTime.get(slot.time);
-      if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byTime.set(slot.time, slot);
+      const key = teacherDateTimeKey(teacher.id, dateISO, slot.time);
+      const existing = byCell.get(key);
+      if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byCell.set(key, slot);
     });
-  return byTime;
+  return byCell;
 }
 
 function collectTeacherSlotsForDate(teacher, dateISO) {
@@ -348,7 +353,7 @@ function collectTeacherSlotsForDate(teacher, dateISO) {
   const regular = (teacher.regularSlots || [])
     .filter(slot => slot.day === day)
     .filter(slot => (!slot.startDate || dateOnly(slot.startDate) <= dateISO) && (!slot.endDate || dateOnly(slot.endDate) >= dateISO))
-    .filter(slot => !latestOverrides.has(normalizeTime(slot.time)))
+    .filter(slot => !latestOverrides.has(teacherDateTimeKey(teacher.id, dateISO, slot.time)))
     .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }));
   const overrides = [...latestOverrides.values()]
     .map(slot => ({ ...slot, date: dateISO, day, source: "override", time: normalizeTime(slot.time) }));
