@@ -335,7 +335,10 @@ function latestOverridesForDate(teacher, dateISO, day) {
     .filter(slot => slotAppliesOnDate(slot, dateISO, day))
     .map(slot => ({ ...slot, time: normalizeTime(slot.time) }))
     .filter(slot => slot.time)
-    .forEach(slot => byTime.set(slot.time, slot));
+    .forEach(slot => {
+      const existing = byTime.get(slot.time);
+      if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byTime.set(slot.time, slot);
+    });
   return byTime;
 }
 
@@ -348,7 +351,6 @@ function collectTeacherSlotsForDate(teacher, dateISO) {
     .filter(slot => !latestOverrides.has(normalizeTime(slot.time)))
     .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }));
   const overrides = [...latestOverrides.values()]
-    .filter(slot => !slot.unavailable)
     .map(slot => ({ ...slot, date: dateISO, day, source: "override", time: normalizeTime(slot.time) }));
   return uniqueSlots([...regular, ...overrides]);
 }
@@ -430,7 +432,7 @@ function publicCellFromSlot(slot, teacher, state) {
   const time = normalizeTime(slot.time);
   return {
     cellKey: `${teacher.id}|${date}|${time}`,
-    kind: slot.locked ? "fixed" : "open",
+    kind: slot.unavailable ? "off" : (slot.locked ? "fixed" : "open"),
     id: slot.id || "",
     bookingId: "",
     slotId: slot.id || "",
@@ -443,10 +445,11 @@ function publicCellFromSlot(slot, teacher, state) {
     studentId: slot.studentId || "",
     studentName: cleanStudentName(slot.studentName || ""),
     subject: slot.subject || "",
-    type: slot.locked ? "regular class" : "open slot",
-    status: slot.locked ? "booked" : "available",
+    type: slot.unavailable ? "off" : (slot.locked ? "regular class" : "open slot"),
+    status: slot.unavailable ? "off" : (slot.locked ? "booked" : "available"),
     locked: Boolean(slot.locked),
-    available: !slot.locked,
+    unavailable: Boolean(slot.unavailable),
+    available: !slot.locked && !slot.unavailable,
     minutes: 25,
     source: slot.source || "",
     remark: slot.remark || "",
@@ -485,10 +488,14 @@ function resolveTeacherCalendar(state, options = {}) {
       const booking = resolved && resolved.booking;
       const slot = slotByTime.get(time);
       const trace = resolved ? resolution.traces.get(resolved.key) : [];
+      if (slot && slot.unavailable && (!booking || bookingAmendmentTime(slot) >= bookingAmendmentTime(booking))) {
+        rows.push(publicCellFromSlot(slot, teacher, state));
+        return;
+      }
       if (booking) {
         debugTeacherViewBookingChoice(teacher, dateISO, time, trace, booking);
         if (isDeletedBooking(booking)) {
-          if (slot && !slot.locked && !slot.reserved) rows.push(publicCellFromSlot(slot, teacher, state));
+          if (slot && (!slot.locked || slot.unavailable) && !slot.reserved) rows.push(publicCellFromSlot(slot, teacher, state));
           return;
         }
         rows.push(publicCellFromBooking(booking, teacher, state));
