@@ -105,6 +105,52 @@ function testStaleOpenOverrideDoesNotHideLockedRegularSlot() {
   assert.equal(cell(cells, "2026-07-16", "20:30").studentName, "Ngooi Jun");
 }
 
+function testLeeShokYuongNgooiJunRecurringStaysBooked() {
+  const teacher = {
+    id: "teacher_lee_shok_yuong",
+    name: "Lee Shok Yuong",
+    rate: 10,
+    regularSlots: [{
+      id: "slot_lee_shok_yuong_thursday_2030",
+      day: "Thursday",
+      time: "20:30",
+      locked: true,
+      studentName: "Ngooi Jun",
+      studentId: "student_ngooi_jun",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-07-01",
+      endDate: "",
+      updatedAt: "2026-07-12T00:00:00.000Z"
+    }],
+    overrideSlots: [{
+      id: "open_override_lee_shok_yuong_2026_07_16_2030",
+      date: "2026-07-16",
+      day: "Thursday",
+      time: "20:30",
+      locked: false,
+      unavailable: false,
+      source: "teacher-overview-open-slot",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }]
+  };
+  const cells = resolveTeacherCalendar({
+    teachers: [teacher],
+    bookings: [],
+    students: [{ id: "student_ngooi_jun", name: "Ngooi Jun" }]
+  }, {
+    teacher,
+    teacherId: teacher.id,
+    from: "2026-07-16",
+    to: "2026-07-16",
+    stateVersion: 1
+  }).cells;
+  const resolved = cells.find(item => item.cellKey === teacherDateTimeKey("teacher_lee_shok_yuong", "2026-07-16", "20:30"));
+  assert.equal(resolved && resolved.studentName, "Ngooi Jun");
+  assert.equal(resolved && resolved.type, "regular class");
+  assert.notEqual(resolved && resolved.status, "available");
+}
+
 function testLatestBookingRecordWins() {
   const teacher = baseTeacher();
   const cells = resolve({
@@ -194,6 +240,7 @@ function testSetOffSupersedesOlderBooking() {
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
+testLeeShokYuongNgooiJunRecurringStaysBooked();
 testLatestBookingRecordWins();
 testStudentNotShowDisplaysLatestStatus();
 testSetOffSupersedesOlderBooking();
