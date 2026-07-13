@@ -5,8 +5,10 @@ const {
   isDeletedBooking,
   resolveBookingRecords
 } = require("../lib/booking-resolution");
+const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const API_BUILD = "2026.07.13-stability.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -743,7 +745,7 @@ module.exports = async function handler(req, res) {
     if (!row || !row.data) return sendJson(res, 404, { ok: false, error: "Timetable data is not ready yet." });
 
     const state = row.data || {};
-    state.bookings = normalizeBookingsForTeacherView(state.bookings);
+    state.bookings = calendarResolver.normalizeBookingsForTeacherView(state.bookings);
     const teacher = findTeacher(state, req);
     if (!teacher) return sendJson(res, 404, { ok: false, error: "Teacher not found." });
     if (!hasAdminApiKey(req) && !hasTeacherToken(req, teacher)) {
@@ -757,12 +759,13 @@ module.exports = async function handler(req, res) {
     const bookings = uniqueBookings(bookingCandidates)
       .filter(booking => !isDeletedBooking(booking))
       .map(booking => publicBooking(booking, teacher, state));
-    const resolvedCalendar = resolveTeacherCalendar(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
+    const resolvedCalendar = calendarResolver.resolveTeacherCalendar(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
     const cells = resolvedCalendar.cells;
     const debug = String(req.query && req.query.debug || "") === "1";
 
     return sendJson(res, 200, {
       ok: true,
+      build: API_BUILD,
       key: row.key,
       version: Number(row.version || 0),
       updatedAt: row.updated_at,
@@ -779,7 +782,7 @@ module.exports = async function handler(req, res) {
       bookings,
       cells,
       students: activeTeacherStudents(teacher, state),
-      ...(debug ? { bookingResolutionDiagnostics: bookingResolutionDiagnostics(bookingCandidates) } : {})
+      ...(debug ? { bookingResolutionDiagnostics: calendarResolver.bookingResolutionDiagnostics(bookingCandidates) } : {})
     });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });

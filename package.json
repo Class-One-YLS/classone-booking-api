@@ -5,7 +5,8 @@
   "description": "Class One booking system API for Neon PostgreSQL and Vercel.",
   "main": "api/state.js",
   "scripts": {
-    "check": "node --check api/health.js && node --check api/state.js && node --check api/state-version.js && node --check api/state-chunk.js && node --check api/teacher-view.js && node --check api/teacher-version.js && node --check api/teacher-students.js && node --check api/teacher-incentive-claim.js && node --check api/audit.js && node --check lib/booking-resolution.js && node --check lib/db.js && node --check lib/http.js && node -e \"require.resolve('./lib/booking-resolution.js')\"",
+    "test": "node test/calendar-resolver.test.js",
+    "check": "node --check api/health.js && node --check api/state.js && node --check api/state-version.js && node --check api/state-chunk.js && node --check api/teacher-view.js && node --check api/teacher-version.js && node --check api/teacher-students.js && node --check api/teacher-incentive-claim.js && node --check api/audit.js && node --check lib/booking-resolution.js && node --check lib/calendar-resolver.js && node --check lib/db.js && node --check lib/http.js && node -e \"require.resolve('./lib/booking-resolution.js')\" && node -e \"require.resolve('./lib/calendar-resolver.js')\" && npm test",
     "vercel-build": "npm run check"
   },
   "dependencies": {
