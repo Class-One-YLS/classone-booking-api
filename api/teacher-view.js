@@ -341,21 +341,38 @@ function latestOverridesForDate(teacher, dateISO, day) {
     .filter(slot => slot.time)
     .forEach(slot => {
       const key = teacherDateTimeKey(teacher.id, dateISO, slot.time);
+      slot._cellKey = key;
       const existing = byCell.get(key);
       if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byCell.set(key, slot);
     });
   return byCell;
 }
 
+function overrideSupersedesRegularSlot(override, regularSlot) {
+  if (!override) return false;
+  if (!regularSlot) return true;
+  const overrideTime = bookingAmendmentTime(override);
+  const regularTime = bookingAmendmentTime(regularSlot);
+  if (regularSlot.locked && !override.locked && !override.unavailable && !override.studentName) return false;
+  return overrideTime >= regularTime;
+}
+
 function collectTeacherSlotsForDate(teacher, dateISO) {
   const day = dayName(dateISO);
   const latestOverrides = latestOverridesForDate(teacher, dateISO, day);
+  const keptRegularKeys = new Set();
   const regular = (teacher.regularSlots || [])
     .filter(slot => slot.day === day)
     .filter(slot => (!slot.startDate || dateOnly(slot.startDate) <= dateISO) && (!slot.endDate || dateOnly(slot.endDate) >= dateISO))
-    .filter(slot => !latestOverrides.has(teacherDateTimeKey(teacher.id, dateISO, slot.time)))
-    .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }));
+    .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }))
+    .filter(slot => {
+      const key = teacherDateTimeKey(teacher.id, dateISO, slot.time);
+      const keep = !overrideSupersedesRegularSlot(latestOverrides.get(key), slot);
+      if (keep) keptRegularKeys.add(key);
+      return keep;
+    });
   const overrides = [...latestOverrides.values()]
+    .filter(slot => !keptRegularKeys.has(slot._cellKey || teacherDateTimeKey(teacher.id, dateISO, slot.time)))
     .map(slot => ({ ...slot, date: dateISO, day, source: "override", time: normalizeTime(slot.time) }));
   return uniqueSlots([...regular, ...overrides]);
 }
