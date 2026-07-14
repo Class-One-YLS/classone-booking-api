@@ -8,7 +8,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.07.13-stability.1";
+const API_BUILD = "2026.07.14-calendar-parity.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -756,11 +756,38 @@ module.exports = async function handler(req, res) {
       .filter(booking => booking.teacherId === teacher.id)
       .map(booking => repairFixedSnapshotBooking(booking))
       .filter(booking => dateRangeMatches(booking.date, from, to));
-    const bookings = uniqueBookings(bookingCandidates)
-      .filter(booking => !isDeletedBooking(booking))
-      .map(booking => publicBooking(booking, teacher, state));
     const resolvedCalendar = calendarResolver.resolveTeacherCalendar(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
     const cells = resolvedCalendar.cells;
+    const bookings = cells
+      .filter(cell => cell.kind === "booking" || cell.bookingId)
+      .map(cell => ({
+        id: cell.bookingId || cell.id || "",
+        bookingId: cell.bookingId || "",
+        sourceRecordId: cell.sourceRecordId || cell.bookingId || "",
+        teacherId: cell.teacherId || teacher.id,
+        studentId: cell.studentId || "",
+        loadedFrom: "api/teacher-view resolvedCalendar.cells",
+        date: dateOnly(cell.date || ""),
+        day: cell.day || "",
+        time: normalizeTime(cell.time),
+        studentName: cleanStudentName(cell.studentName || ""),
+        subject: cell.subject || "",
+        type: cell.type || "regular class",
+        status: cell.status || "booked",
+        minutes: Number(cell.minutes || 25),
+        remark: cell.remark || "",
+        updatedAt: cell.updatedAt || "",
+        slotRevisionAt: cell.slotRevisionAt || "",
+        statusChangedAt: cell.statusChangedAt || "",
+        changedAt: cell.changedAt || "",
+        changedSlot: cell.changedSlot || null,
+        rebookedAt: cell.rebookedAt || "",
+        cancelledAt: cell.cancelledAt || "",
+        completedAt: cell.completedAt || "",
+        studentNotShowAt: cell.studentNotShowAt || "",
+        createdAt: cell.createdAt || "",
+        estimatedPay: Number(cell.estimatedPay || 0)
+      }));
     const debug = String(req.query && req.query.debug || "") === "1";
 
     return sendJson(res, 200, {

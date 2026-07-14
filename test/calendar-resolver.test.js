@@ -29,6 +29,44 @@ function cell(cells, date, time) {
   return cells.find(item => item.cellKey === teacherDateTimeKey("teacher_peggy", date, time));
 }
 
+const PARITY_FIELDS = [
+  "bookingId",
+  "recurringScheduleId",
+  "studentId",
+  "studentName",
+  "subject",
+  "type",
+  "status",
+  "available",
+  "locked",
+  "remark",
+  "minutes"
+];
+
+function paritySnapshot(value) {
+  if (!value) return null;
+  return {
+    bookingId: value.bookingId || "",
+    recurringScheduleId: value.recurringScheduleId || value.slotId || "",
+    studentId: value.studentId || "",
+    studentName: value.studentName || "",
+    subject: value.subject || "",
+    type: value.type || "",
+    status: value.status || "",
+    available: Boolean(value.available),
+    locked: Boolean(value.locked),
+    remark: value.remark || "",
+    minutes: Number(value.minutes || 0)
+  };
+}
+
+function assertParityCell(actual, expected, message) {
+  const snapshot = paritySnapshot(actual);
+  PARITY_FIELDS.forEach(field => {
+    assert.deepStrictEqual(snapshot && snapshot[field], expected[field], `${message}: ${field}`);
+  });
+}
+
 function testRecurringStartEnd() {
   const teacher = baseTeacher({
     regularSlots: [{
@@ -237,6 +275,222 @@ function testSetOffSupersedesOlderBooking() {
   assert.equal(resolved.status, "off");
 }
 
+function testResolvedCellParityCases() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "slot_regular_monday_1800",
+      day: "Monday",
+      time: "18:00",
+      locked: true,
+      studentId: "student_regular",
+      studentName: "Regular Student",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }, {
+      id: "slot_leave_tuesday_1000",
+      day: "Tuesday",
+      time: "10:00",
+      locked: false,
+      subject: "CN",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }],
+    overrideSlots: [{
+      id: "off_wednesday_1430",
+      date: "2026-07-15",
+      day: "Wednesday",
+      time: "14:30",
+      unavailable: true,
+      status: "off",
+      updatedAt: "2026-07-15T09:00:00.000Z"
+    }]
+  });
+  const state = {
+    teachers: [teacher],
+    students: [],
+    teacherLeaves: [{
+      id: "leave_1",
+      teacherId: teacher.id,
+      status: "active",
+      startDate: "2026-07-14",
+      endDate: "2026-07-14",
+      fromTime: "10:00",
+      toTime: "10:00",
+      remark: "Training",
+      updatedAt: "2026-07-14T08:00:00.000Z"
+    }],
+    bookings: [{
+      id: "booking_trial",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "09:00",
+      studentId: "student_trial",
+      studentName: "Trial Student",
+      subject: "CN",
+      type: "trial class",
+      status: "booked",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_exam",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "09:30",
+      studentId: "student_exam",
+      studentName: "Exam Student",
+      subject: "BM",
+      type: "exam",
+      status: "booked",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_assessment",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "10:00",
+      studentId: "student_assessment",
+      studentName: "Assessment Student",
+      subject: "PK",
+      type: "assessment",
+      status: "booked",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_replacement",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "10:30",
+      studentId: "student_replacement",
+      studentName: "Replacement Student",
+      subject: "CN",
+      type: "replacement class",
+      status: "booked",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_cancelled",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "11:00",
+      studentId: "student_cancelled",
+      studentName: "Cancelled Student",
+      subject: "CN",
+      type: "regular class",
+      status: "cancelled",
+      remark: "Parent cancelled",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_not_show",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "11:30",
+      studentId: "student_not_show",
+      studentName: "Not Show Student",
+      subject: "CN",
+      type: "regular class",
+      status: "student_not_show",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_public_holiday",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "12:00",
+      studentId: "student_holiday",
+      studentName: "Holiday Student",
+      subject: "CN",
+      type: "regular class",
+      status: "public_holiday",
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }, {
+      id: "booking_moved",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "12:30",
+      studentId: "student_moved",
+      studentName: "Moved Student",
+      subject: "CN",
+      type: "regular class",
+      status: "booked",
+      changedSlot: { fromDate: "2026-07-13", fromTime: "13:00", changedAt: "2026-07-13T08:05:00.000Z" },
+      updatedAt: "2026-07-13T08:05:00.000Z"
+    }, {
+      id: "booking_deleted",
+      teacherId: teacher.id,
+      date: "2026-07-13",
+      time: "13:30",
+      studentName: "Deleted Student",
+      subject: "CN",
+      type: "regular class",
+      status: "deleted",
+      deleted: true,
+      updatedAt: "2026-07-13T08:00:00.000Z"
+    }]
+  };
+  const cells = resolve(state, "2026-07-13", "2026-07-15");
+  assertParityCell(cell(cells, "2026-07-13", "18:00"), {
+    bookingId: "",
+    recurringScheduleId: "slot_regular_monday_1800",
+    studentId: "student_regular",
+    studentName: "Regular Student",
+    subject: "CN",
+    type: "regular class",
+    status: "booked",
+    available: false,
+    locked: true,
+    remark: "",
+    minutes: 25
+  }, "recurring regular class");
+  [
+    ["09:00", "booking_trial", "student_trial", "Trial Student", "CN", "trial class", "booked", ""],
+    ["09:30", "booking_exam", "student_exam", "Exam Student", "BM", "exam", "booked", ""],
+    ["10:00", "booking_assessment", "student_assessment", "Assessment Student", "PK", "assessment", "booked", ""],
+    ["10:30", "booking_replacement", "student_replacement", "Replacement Student", "CN", "replacement class", "booked", ""],
+    ["11:00", "booking_cancelled", "student_cancelled", "Cancelled Student", "CN", "regular class", "cancelled", "Parent cancelled"],
+    ["11:30", "booking_not_show", "student_not_show", "Not Show Student", "CN", "regular class", "student_not_show", ""],
+    ["12:00", "booking_public_holiday", "student_holiday", "Holiday Student", "CN", "regular class", "public_holiday", ""],
+    ["12:30", "booking_moved", "student_moved", "Moved Student", "CN", "regular class", "booked", ""]
+  ].forEach(([time, bookingId, studentId, studentName, subject, type, status, remark]) => {
+    assertParityCell(cell(cells, "2026-07-13", time), {
+      bookingId,
+      recurringScheduleId: "",
+      studentId,
+      studentName,
+      subject,
+      type,
+      status,
+      available: false,
+      locked: true,
+      remark,
+      minutes: 25
+    }, `${type} ${status}`);
+  });
+  assertParityCell(cell(cells, "2026-07-14", "10:00"), {
+    bookingId: "leave_leave_1_2026-07-14_10:00",
+    recurringScheduleId: "",
+    studentId: "",
+    studentName: "Teacher Leave",
+    subject: "CN",
+    type: "teacher leave",
+    status: "teacher_leave",
+    available: false,
+    locked: true,
+    remark: "Training",
+    minutes: 25
+  }, "teacher leave");
+  assertParityCell(cell(cells, "2026-07-15", "14:30"), {
+    bookingId: "",
+    recurringScheduleId: "off_wednesday_1430",
+    studentId: "",
+    studentName: "",
+    subject: "",
+    type: "off",
+    status: "off",
+    available: false,
+    locked: false,
+    remark: "",
+    minutes: 25
+  }, "set off");
+  assert.equal(cell(cells, "2026-07-13", "13:30"), undefined, "deleted booking should not produce an active final cell");
+}
+
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
@@ -244,5 +498,6 @@ testLeeShokYuongNgooiJunRecurringStaysBooked();
 testLatestBookingRecordWins();
 testStudentNotShowDisplaysLatestStatus();
 testSetOffSupersedesOlderBooking();
+testResolvedCellParityCases();
 
 console.log("calendar-resolver stability tests passed");
