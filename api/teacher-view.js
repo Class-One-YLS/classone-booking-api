@@ -8,7 +8,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.07.14-calendar-parity.1";
+const API_BUILD = "2026.07.15-micro-franchise-package-lookup.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -139,14 +139,14 @@ function datesBetween(from, to) {
 function findStudent(state, studentId, studentName) {
   const cleanName = cleanStudentName(studentName).toLowerCase();
   const students = Array.isArray(state.students) ? state.students : [];
-  return students.find(student => studentId && student.id === studentId)
+  return students.find(student => studentId && String(student.id || "") === String(studentId))
     || students.find(student => cleanName && cleanStudentName(student.name).toLowerCase() === cleanName)
     || null;
 }
 
 function findStudentById(state, studentId) {
   if (!studentId) return null;
-  return (Array.isArray(state.students) ? state.students : []).find(student => student.id === studentId) || null;
+  return (Array.isArray(state.students) ? state.students : []).find(student => String(student.id || "") === String(studentId)) || null;
 }
 
 function isStudentArchived(student) {
@@ -245,6 +245,11 @@ function notShowAllowance(state, date = "") {
   return Number(activePolicyRule(state, date).notShowAllowance ?? 5);
 }
 
+function studentPackageClassCount(student) {
+  const value = student?.packageClasses ?? student?.packageTotalClasses ?? student?.totalClasses ?? student?.packageTotalClass;
+  return Number(value);
+}
+
 function getTeacherIncomeMode(teacher) {
   return (teacher?.category || "freelance") === "micro_franchisee" ? "profit_share" : "fixed_rate";
 }
@@ -271,7 +276,7 @@ function incomeStatusForCell(cell, reference = new Date()) {
 
 function isPaidCompletedCell(cell, reference = new Date()) {
   const type = String(cell?.type || "").toLowerCase();
-  const status = incomeStatusForCell(cell, reference);
+  const status = cell?.status || "";
   return status === "completed" && type !== "practical class" && type !== "cancelled";
 }
 
@@ -279,18 +284,29 @@ function isNoShowCell(cell) {
   return (cell?.status || "") === "student_not_show";
 }
 
-function packageValidation(student, teacher) {
+function packageValidation(student, teacher, lookupDiagnostic = "") {
+  if (!student) {
+    return {
+      valid: false,
+      reasons: [lookupDiagnostic || "Student profile not found"],
+      packageName: "",
+      packageAmount: 0,
+      packageTotalClasses: 0,
+      profitSharePercentage: Number(teacher?.profitShare || 0)
+    };
+  }
   const packageAmount = Number(student?.packageAmount);
-  const packageTotalClasses = Number(student?.packageClasses);
+  const packageTotalClasses = studentPackageClassCount(student);
   const profitSharePercentage = Number(teacher?.profitShare);
   const reasons = [];
-  if (!student) reasons.push("student profile missing");
-  if (!Number.isFinite(packageAmount) || packageAmount < 0) reasons.push("package amount missing");
-  if (!Number.isFinite(packageTotalClasses) || packageTotalClasses <= 0) reasons.push("package total classes missing");
+  if (!Number.isFinite(packageAmount) || packageAmount <= 0) reasons.push("Package amount missing in Student Profile");
+  if (!Number.isFinite(packageTotalClasses)) reasons.push("Package total classes missing in Student Profile");
+  else if (packageTotalClasses <= 0) reasons.push("Package total classes must be greater than 0");
   if (!Number.isFinite(profitSharePercentage) || profitSharePercentage < 0 || profitSharePercentage > 100) reasons.push("profit share invalid");
   return {
     valid: reasons.length === 0,
     reasons,
+    packageName: student?.package || "",
     packageAmount: Number.isFinite(packageAmount) ? packageAmount : 0,
     packageTotalClasses: Number.isFinite(packageTotalClasses) ? packageTotalClasses : 0,
     profitSharePercentage: Number.isFinite(profitSharePercentage) ? profitSharePercentage : 0
@@ -312,14 +328,15 @@ function calculateFreelanceTeacherIncome({ teacher, completedCells, noShowCells,
   };
 }
 
-function calculateMicroFranchiseStudentIncome({ teacher, student, studentId, studentName, completedCells }) {
-  const validation = packageValidation(student, teacher);
+function calculateMicroFranchiseStudentIncome({ teacher, student, studentId, studentName, completedCells, lookupDiagnostic }) {
+  const validation = packageValidation(student, teacher, lookupDiagnostic);
   const lessonRate = validation.valid ? validation.packageAmount / validation.packageTotalClasses : 0;
   const teacherRatePerLesson = validation.valid ? lessonRate * (validation.profitSharePercentage / 100) : 0;
   const income = validation.valid ? completedCells.length * teacherRatePerLesson : 0;
   return {
     studentId: student?.id || studentId || "",
     studentName: cleanStudentName(student?.name || studentName || "Student"),
+    packageName: validation.packageName,
     packageAmount: validation.packageAmount,
     packageTotalClasses: validation.packageTotalClasses,
     lessonRate,
@@ -328,25 +345,58 @@ function calculateMicroFranchiseStudentIncome({ teacher, student, studentId, stu
     completedLessons: completedCells.length,
     income,
     packageIncomplete: !validation.valid,
-    diagnostic: validation.valid ? "" : `Package incomplete: ${cleanStudentName(student?.name || studentName || studentId || "Unknown student")} (${validation.reasons.join(", ")})`
+    diagnostic: validation.valid ? "" : `Package incomplete: ${cleanStudentName(student?.name || studentName || "Unknown student")} (${validation.reasons[0] || "Student Profile package incomplete"})`
+  };
+}
+
+function studentProfileForIncomeCell(state, cell) {
+  const byId = findStudentById(state, cell?.studentId);
+  if (byId) return { student: byId, diagnostic: "" };
+  const students = Array.isArray(state.students) ? state.students : [];
+  const cellDay = cell?.day || dayName(dateOnly(cell?.date));
+  const cellTime = normalizeTime(cell?.time);
+  const cellDate = dateOnly(cell?.date);
+  const cellName = cleanStudentName(cell?.studentName || "").toLowerCase();
+  const legacyMatch = students.find(student => {
+    const slots = Array.isArray(student.regularSlots) ? student.regularSlots : [];
+    if (cellName && cleanStudentName(student.name || "").toLowerCase() !== cellName) return false;
+    return slots.some(slot =>
+      String(slot.teacherId || "") === String(cell?.teacherId || "") &&
+      normalizeTime(slot.time) === cellTime &&
+      String(slot.day || "") === String(cellDay || "") &&
+      (!slot.startDate || dateOnly(slot.startDate) <= cellDate) &&
+      (!slot.endDate || dateOnly(slot.endDate) >= cellDate)
+    );
+  });
+  if (legacyMatch) return { student: legacyMatch, diagnostic: "Matched legacy timetable cell to Student Profile regular slot." };
+  return {
+    student: null,
+    diagnostic: cell?.studentId
+      ? `Student profile not found for studentId: ${cell.studentId}`
+      : "Student profile not found for this completed lesson."
   };
 }
 
 function calculateMicroFranchiseTeacherIncome({ teacher, completedCells, noShowCells, state }) {
   const byStudent = new Map();
   completedCells.forEach(cell => {
-    const key = cell.studentId || `missing_${cell.studentName || "student"}`;
-    const row = byStudent.get(key) || { studentId: cell.studentId || "", studentName: cell.studentName || "", cells: [] };
+    const lookup = studentProfileForIncomeCell(state, cell);
+    const student = lookup.student;
+    const key = student?.id || cell.studentId || `missing_${cell.studentName || "student"}`;
+    const row = byStudent.get(key) || { studentId: student?.id || cell.studentId || "", studentName: student?.name || cell.studentName || "", student, lookupDiagnostic: lookup.diagnostic, cells: [] };
+    if (student && !row.student) row.student = student;
+    if (lookup.diagnostic && !row.lookupDiagnostic) row.lookupDiagnostic = lookup.diagnostic;
     row.cells.push(cell);
     byStudent.set(key, row);
   });
   const studentIncomeRows = [...byStudent.values()]
     .map(row => calculateMicroFranchiseStudentIncome({
       teacher,
-      student: findStudentById(state, row.studentId),
+      student: row.student || findStudentById(state, row.studentId),
       studentId: row.studentId,
       studentName: row.studentName,
-      completedCells: row.cells
+      completedCells: row.cells,
+      lookupDiagnostic: row.lookupDiagnostic
     }))
     .sort((a, b) => a.studentName.localeCompare(b.studentName, "en", { sensitivity: "base" }));
   const completedIncome = studentIncomeRows.reduce((sum, row) => sum + (row.packageIncomplete ? 0 : Number(row.income || 0)), 0);
