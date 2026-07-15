@@ -144,6 +144,11 @@ function findStudent(state, studentId, studentName) {
     || null;
 }
 
+function findStudentById(state, studentId) {
+  if (!studentId) return null;
+  return (Array.isArray(state.students) ? state.students : []).find(student => student.id === studentId) || null;
+}
+
 function isStudentArchived(student) {
   return !student || student.status === "archived" || student.archived === true || student.deleted === true;
 }
@@ -219,7 +224,7 @@ function activeTeacherStudents(teacher, state) {
 
 function lessonPay(teacher, state, studentId, studentName) {
   if ((teacher.category || "freelance") === "micro_franchisee") {
-    const student = findStudent(state, studentId, studentName);
+    const student = findStudentById(state, studentId);
     const amount = Number(student?.packageAmount || 0);
     const classes = Number(student?.packageClasses || 0);
     const share = Number(teacher.profitShare || 0) / 100;
@@ -238,6 +243,153 @@ function activePolicyRule(state, date = "") {
 
 function notShowAllowance(state, date = "") {
   return Number(activePolicyRule(state, date).notShowAllowance ?? 5);
+}
+
+function getTeacherIncomeMode(teacher) {
+  return (teacher?.category || "freelance") === "micro_franchisee" ? "profit_share" : "fixed_rate";
+}
+
+function teacherCategoryLabel(teacher) {
+  return getTeacherIncomeMode(teacher) === "profit_share" ? "Micro Franchisee" : "Freelance Tutor";
+}
+
+function slotDateTime(dateISO, time) {
+  const [year, month, day] = String(dateISO || "").split("-").map(Number);
+  const [hour, minute] = normalizeTime(time).split(":").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, day || 1, hour || 0, minute || 0);
+}
+
+function slotHasPassed(dateISO, time, reference = new Date()) {
+  const dt = slotDateTime(dateISO, time);
+  return !Number.isNaN(dt.getTime()) && dt < reference;
+}
+
+function incomeStatusForCell(cell, reference = new Date()) {
+  const status = cell?.status || "booked";
+  return status === "booked" && slotHasPassed(cell.date, cell.time, reference) ? "completed" : status;
+}
+
+function isPaidCompletedCell(cell, reference = new Date()) {
+  const type = String(cell?.type || "").toLowerCase();
+  const status = incomeStatusForCell(cell, reference);
+  return status === "completed" && type !== "practical class" && type !== "cancelled";
+}
+
+function isNoShowCell(cell) {
+  return (cell?.status || "") === "student_not_show";
+}
+
+function packageValidation(student, teacher) {
+  const packageAmount = Number(student?.packageAmount);
+  const packageTotalClasses = Number(student?.packageClasses);
+  const profitSharePercentage = Number(teacher?.profitShare);
+  const reasons = [];
+  if (!student) reasons.push("student profile missing");
+  if (!Number.isFinite(packageAmount) || packageAmount < 0) reasons.push("package amount missing");
+  if (!Number.isFinite(packageTotalClasses) || packageTotalClasses <= 0) reasons.push("package total classes missing");
+  if (!Number.isFinite(profitSharePercentage) || profitSharePercentage < 0 || profitSharePercentage > 100) reasons.push("profit share invalid");
+  return {
+    valid: reasons.length === 0,
+    reasons,
+    packageAmount: Number.isFinite(packageAmount) ? packageAmount : 0,
+    packageTotalClasses: Number.isFinite(packageTotalClasses) ? packageTotalClasses : 0,
+    profitSharePercentage: Number.isFinite(profitSharePercentage) ? profitSharePercentage : 0
+  };
+}
+
+function calculateFreelanceTeacherIncome({ teacher, completedCells, noShowCells, state }) {
+  const approvedClassRate = Number(teacher?.rate || 0);
+  const completedIncome = completedCells.reduce((sum, cell) => sum + Number(cell.estimatedPay || approvedClassRate || 0), 0);
+  const noShowAllowanceTotal = noShowCells.reduce((sum, cell) => sum + Number(cell.estimatedPay || notShowAllowance(state, cell.date) || 0), 0);
+  return {
+    teacherCategory: teacherCategoryLabel(teacher),
+    incomeMode: "fixed_rate",
+    approvedClassRate,
+    completedLessons: completedCells.length,
+    completedIncome,
+    noShowAllowance: noShowAllowanceTotal,
+    totalIncome: completedIncome + noShowAllowanceTotal
+  };
+}
+
+function calculateMicroFranchiseStudentIncome({ teacher, student, studentId, studentName, completedCells }) {
+  const validation = packageValidation(student, teacher);
+  const lessonRate = validation.valid ? validation.packageAmount / validation.packageTotalClasses : 0;
+  const teacherRatePerLesson = validation.valid ? lessonRate * (validation.profitSharePercentage / 100) : 0;
+  const income = validation.valid ? completedCells.length * teacherRatePerLesson : 0;
+  return {
+    studentId: student?.id || studentId || "",
+    studentName: cleanStudentName(student?.name || studentName || "Student"),
+    packageAmount: validation.packageAmount,
+    packageTotalClasses: validation.packageTotalClasses,
+    lessonRate,
+    profitSharePercentage: validation.profitSharePercentage,
+    teacherRatePerLesson,
+    completedLessons: completedCells.length,
+    income,
+    packageIncomplete: !validation.valid,
+    diagnostic: validation.valid ? "" : `Package incomplete: ${cleanStudentName(student?.name || studentName || studentId || "Unknown student")} (${validation.reasons.join(", ")})`
+  };
+}
+
+function calculateMicroFranchiseTeacherIncome({ teacher, completedCells, noShowCells, state }) {
+  const byStudent = new Map();
+  completedCells.forEach(cell => {
+    const key = cell.studentId || `missing_${cell.studentName || "student"}`;
+    const row = byStudent.get(key) || { studentId: cell.studentId || "", studentName: cell.studentName || "", cells: [] };
+    row.cells.push(cell);
+    byStudent.set(key, row);
+  });
+  const studentIncomeRows = [...byStudent.values()]
+    .map(row => calculateMicroFranchiseStudentIncome({
+      teacher,
+      student: findStudentById(state, row.studentId),
+      studentId: row.studentId,
+      studentName: row.studentName,
+      completedCells: row.cells
+    }))
+    .sort((a, b) => a.studentName.localeCompare(b.studentName, "en", { sensitivity: "base" }));
+  const completedIncome = studentIncomeRows.reduce((sum, row) => sum + (row.packageIncomplete ? 0 : Number(row.income || 0)), 0);
+  const noShowAllowanceTotal = noShowCells.reduce((sum, cell) => sum + Number(cell.estimatedPay || notShowAllowance(state, cell.date) || 0), 0);
+  return {
+    teacherCategory: teacherCategoryLabel(teacher),
+    incomeMode: "profit_share",
+    profitSharePercentage: Number(teacher?.profitShare || 0),
+    completedLessons: completedCells.length,
+    studentIncomeRows,
+    packageWarnings: studentIncomeRows.filter(row => row.packageIncomplete).map(row => row.diagnostic),
+    completedIncome,
+    noShowAllowance: noShowAllowanceTotal,
+    totalIncome: completedIncome + noShowAllowanceTotal
+  };
+}
+
+function calculateTeacherMonthlyIncome({ teacher, state, cells, month, year }) {
+  const reference = new Date();
+  const targetMonth = Number(month);
+  const targetYear = Number(year);
+  const monthCells = (Array.isArray(cells) ? cells : [])
+    .filter(cell => dateOnly(cell.date))
+    .filter(cell => {
+      const date = parseISODate(dateOnly(cell.date));
+      return date.getMonth() === targetMonth && date.getFullYear() === targetYear;
+    })
+    .filter(cell => !["open", "reserved", "off"].includes(cell.kind) && cell.status !== "off" && !cell.unavailable);
+  const completedCells = monthCells.filter(cell => isPaidCompletedCell(cell, reference));
+  const noShowCells = monthCells.filter(isNoShowCell);
+  const cancelledCells = monthCells.filter(cell => ["cancelled", "public_holiday", "teacher_leave"].includes(cell.status || ""));
+  const base = getTeacherIncomeMode(teacher) === "profit_share"
+    ? calculateMicroFranchiseTeacherIncome({ teacher, completedCells, noShowCells, state })
+    : calculateFreelanceTeacherIncome({ teacher, completedCells, noShowCells, state });
+  return {
+    ...base,
+    month: targetMonth,
+    year: targetYear,
+    noShowCount: noShowCells.length,
+    cancelledCount: cancelledCells.length,
+    currency: "MYR",
+    calculatedAt: new Date().toISOString()
+  };
 }
 
 function slotRank(slot) {
@@ -480,7 +632,7 @@ function publicCellFromSlot(slot, teacher, state) {
     createdAt: slot.createdAt || "",
     updatedAt: slot.updatedAt || slot.slotRevisionAt || "",
     resolvedAt: new Date().toISOString(),
-    estimatedPay: slot.locked ? lessonPay(teacher, state, "", slot.studentName || "") : 0
+    estimatedPay: slot.locked ? lessonPay(teacher, state, slot.studentId || "", slot.studentName || "") : 0
   };
 }
 
@@ -548,7 +700,9 @@ function publicTeacher(teacher) {
     photo: teacher.photo || "",
     email: teacher.email || "",
     status: teacher.status || "active",
-    payoutMethod: (teacher.category || "freelance") === "micro_franchisee" ? "Micro Franchisee" : "Freelance Tutor",
+    category: teacher.category || "freelance",
+    payoutMethod: teacherCategoryLabel(teacher),
+    incomeMode: getTeacherIncomeMode(teacher),
     rate: Number(teacher.rate || 0),
     profitShare: Number(teacher.profitShare || 0)
   };
@@ -571,7 +725,7 @@ function publicSlot(slot, teacher, state) {
     startDate: dateOnly(slot.startDate || ""),
     endDate: dateOnly(slot.endDate || ""),
     remark: slot.remark || "",
-    estimatedPay: slot.reserved ? 0 : lessonPay(teacher, state, "", slot.studentName || "")
+    estimatedPay: slot.reserved ? 0 : lessonPay(teacher, state, slot.studentId || "", slot.studentName || "")
   };
 }
 
@@ -758,6 +912,13 @@ module.exports = async function handler(req, res) {
       .filter(booking => dateRangeMatches(booking.date, from, to));
     const resolvedCalendar = calendarResolver.resolveTeacherCalendar(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
     const cells = resolvedCalendar.cells;
+    const selectedMonth = Number.isFinite(Number(req.query && req.query.month))
+      ? Number(req.query.month)
+      : parseISODate(from).getMonth();
+    const selectedYear = Number.isFinite(Number(req.query && req.query.year))
+      ? Number(req.query.year)
+      : parseISODate(from).getFullYear();
+    const incomeSummary = calculateTeacherMonthlyIncome({ teacher, state, cells, month: selectedMonth, year: selectedYear });
     const bookings = cells
       .filter(cell => cell.kind === "booking" || cell.bookingId)
       .map(cell => ({
@@ -804,6 +965,7 @@ module.exports = async function handler(req, res) {
       from,
       to,
       teacher: publicTeacher(teacher),
+      incomeSummary,
       regularSlots: (teacher.regularSlots || []).map(slot => publicSlot(slot, teacher, state)),
       overrideSlots: (teacher.overrideSlots || []).map(slot => publicSlot(slot, teacher, state)),
       bookings,
