@@ -585,7 +585,7 @@ function teacherLeaveForSlot(state, teacherId, date, time) {
   const targetTime = normalizeTime(time) || time;
   const targetMinutes = Number(targetTime.replace(":", ""));
   return (state.teacherLeaves || []).find(leave =>
-    leave.status !== "cancelled" &&
+    !["cancelled", "undone"].includes(leave.status || "active") &&
     leave.teacherId === teacherId &&
     dateOnly(leave.startDate || leave.date) <= date &&
     dateOnly(leave.endDate || leave.startDate || leave.date) >= date &&
