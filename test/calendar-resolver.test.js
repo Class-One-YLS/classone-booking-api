@@ -463,10 +463,10 @@ function testResolvedCellParityCases() {
     }, `${type} ${status}`);
   });
   assertParityCell(cell(cells, "2026-07-14", "10:00"), {
-    bookingId: "leave_leave_1_2026-07-14_10:00",
-    recurringScheduleId: "",
+    bookingId: "",
+    recurringScheduleId: "teacher_leave_off_leave_1_teacher_peggy_2026-07-14_10_00",
     studentId: "",
-    studentName: "Teacher Leave",
+    studentName: "",
     subject: "CN",
     type: "teacher leave",
     status: "teacher_leave",
@@ -491,6 +491,45 @@ function testResolvedCellParityCases() {
   assert.equal(cell(cells, "2026-07-13", "13:30"), undefined, "deleted booking should not produce an active final cell");
 }
 
+function testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "open_friday_0900",
+      day: "Friday",
+      time: "09:00",
+      locked: false,
+      subject: "CN",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    bookings: [],
+    teacherLeaves: [{
+      id: "leave_friday",
+      teacherId: "teacher_peggy",
+      status: "active",
+      startDate: "2026-07-24",
+      endDate: "2026-07-24",
+      fromTime: "08:00",
+      toTime: "21:30",
+      reason: "Leave",
+      updatedAt: "2026-07-20T00:00:00.000Z"
+    }]
+  }, "2026-07-24", "2026-07-31");
+  const leaveDate = cell(cells, "2026-07-24", "09:00");
+  assert.equal(leaveDate.kind, "off");
+  assert.equal(leaveDate.status, "teacher_leave");
+  assert.equal(leaveDate.available, false);
+  assert.equal(leaveDate.locked, true);
+  const nextWeek = cell(cells, "2026-07-31", "09:00");
+  assert.equal(nextWeek.kind, "open");
+  assert.equal(nextWeek.status, "available");
+  assert.equal(nextWeek.available, true);
+}
+
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
@@ -499,5 +538,6 @@ testLatestBookingRecordWins();
 testStudentNotShowDisplaysLatestStatus();
 testSetOffSupersedesOlderBooking();
 testResolvedCellParityCases();
+testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate();
 
 console.log("calendar-resolver stability tests passed");

@@ -581,6 +581,43 @@ function collectTeacherSlotsForDate(teacher, dateISO) {
   return uniqueSlots([...regular, ...overrides]);
 }
 
+function teacherLeaveForSlot(state, teacherId, date, time) {
+  const targetTime = normalizeTime(time) || time;
+  const targetMinutes = Number(targetTime.replace(":", ""));
+  return (state.teacherLeaves || []).find(leave =>
+    leave.status !== "cancelled" &&
+    leave.teacherId === teacherId &&
+    dateOnly(leave.startDate || leave.date) <= date &&
+    dateOnly(leave.endDate || leave.startDate || leave.date) >= date &&
+    Number(normalizeTime(leave.fromTime || "00:00").replace(":", "")) <= targetMinutes &&
+    targetMinutes <= Number(normalizeTime(leave.toTime || "23:30").replace(":", ""))
+  ) || null;
+}
+
+function teacherLeaveOffSlotFromCell(slot, leave) {
+  const teacherId = slot.teacherId || leave.teacherId;
+  const date = dateOnly(slot.date || leave.startDate || leave.date);
+  const time = normalizeTime(slot.time);
+  return {
+    id: `teacher_leave_off_${leave.id}_${teacherId}_${date}_${time}`.replace(/[^a-zA-Z0-9_-]/g, "_"),
+    teacherId,
+    date,
+    day: slot.day || dayName(date),
+    time,
+    subject: slot.subject || "",
+    unavailable: true,
+    status: "teacher_leave",
+    source: "teacher_leave",
+    teacherLeaveId: leave.id,
+    previousKind: slot.kind || "open",
+    previousStatus: slot.status || "available",
+    remark: leave.reason || leave.remark || "Teacher on leave",
+    createdAt: leave.createdAt || leave.updatedAt || "",
+    updatedAt: leave.updatedAt || leave.createdAt || "",
+    deviceId: leave.deviceId || ""
+  };
+}
+
 function publicCellFromBooking(booking, teacher, state) {
   const status = booking.status || "booked";
   const date = dateOnly(booking.date);
@@ -656,6 +693,9 @@ function publicCellFromSlot(slot, teacher, state) {
   }
   const date = dateOnly(slot.date);
   const time = normalizeTime(slot.time);
+  const leaveUnavailable = Boolean(slot.unavailable && (slot.status === "teacher_leave" || slot.teacherLeaveId));
+  const locked = Boolean(slot.locked || leaveUnavailable);
+  const unavailableStatus = slot.unavailable ? (slot.status || "off") : "";
   return {
     cellKey: `${teacher.id}|${date}|${time}`,
     kind: slot.unavailable ? "off" : (slot.locked ? "fixed" : "open"),
@@ -671,11 +711,12 @@ function publicCellFromSlot(slot, teacher, state) {
     studentId: slot.studentId || "",
     studentName: cleanStudentName(slot.studentName || ""),
     subject: slot.subject || "",
-    type: slot.unavailable ? "off" : (slot.locked ? "regular class" : "open slot"),
-    status: slot.unavailable ? "off" : (slot.locked ? "booked" : "available"),
-    locked: Boolean(slot.locked),
+    type: slot.unavailable ? (unavailableStatus === "teacher_leave" ? "teacher leave" : "off") : (slot.locked ? "regular class" : "open slot"),
+    status: slot.unavailable ? unavailableStatus : (slot.locked ? "booked" : "available"),
+    teacherLeaveId: slot.teacherLeaveId || "",
+    locked,
     unavailable: Boolean(slot.unavailable),
-    available: !slot.locked && !slot.unavailable,
+    available: !locked && !slot.unavailable,
     minutes: 25,
     source: slot.source || "",
     remark: slot.remark || "",
@@ -726,6 +767,11 @@ function resolveTeacherCalendar(state, options = {}) {
         }
         rows.push(publicCellFromBooking(booking, teacher, state));
       } else if (slot) {
+        const leave = teacherLeaveForSlot(state, teacher.id, dateISO, time);
+        if (leave) {
+          rows.push(publicCellFromSlot(teacherLeaveOffSlotFromCell(slot, leave), teacher, state));
+          return;
+        }
         rows.push(publicCellFromSlot(slot, teacher, state));
       }
     });
