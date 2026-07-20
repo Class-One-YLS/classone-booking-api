@@ -450,15 +450,50 @@ function slotRank(slot) {
   return 1;
 }
 
+function isDeletedSlotRecord(slot) {
+  const status = String(slot && slot.status || "").toLowerCase();
+  return !slot ||
+    slot.deleted === true ||
+    slot.archived === true ||
+    slot.active === false ||
+    Boolean(slot.removedAt) ||
+    Boolean(slot.deletedAt) ||
+    status === "deleted" ||
+    status === "removed";
+}
+
+function slotSourceKey(slot) {
+  if (slot && slot.id) return `id:${slot.id}`;
+  return `cell:${slot && slot.teacherId || ""}|${slot && slot.day || ""}|${dateOnly(slot && slot.date || "")}|${normalizeTime(slot && slot.time) || slot && slot.time || ""}|${slot && slot.studentId || ""}|${cleanStudentName(slot && slot.studentName || "").toLowerCase()}|${slot && slot.subject || ""}|${dateOnly(slot && slot.startDate || "")}`;
+}
+
+function effectiveSlotRecords(slots) {
+  const byKey = new Map();
+  (Array.isArray(slots) ? slots : []).forEach(slot => {
+    if (!slot) return;
+    const key = slotSourceKey(slot);
+    const existing = byKey.get(key);
+    if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byKey.set(key, slot);
+  });
+  return [...byKey.values()];
+}
+
+function activeSlotRecords(slots) {
+  return effectiveSlotRecords(slots).filter(slot => !isDeletedSlotRecord(slot));
+}
+
 function uniqueSlots(slots) {
   const byTime = new Map();
   slots.forEach(slot => {
+    if (isDeletedSlotRecord(slot)) return;
     const time = normalizeTime(slot.time);
     if (!time) return;
     const normalized = { ...slot, time };
     const key = `${normalized.date || ""}|${normalized.time}`;
     const existing = byTime.get(key);
-    if (!existing || slotRank(normalized) > slotRank(existing)) byTime.set(key, normalized);
+    const newer = bookingAmendmentTime(normalized) > bookingAmendmentTime(existing);
+    const sameTime = bookingAmendmentTime(normalized) === bookingAmendmentTime(existing);
+    if (!existing || newer || (sameTime && slotRank(normalized) > slotRank(existing))) byTime.set(key, normalized);
   });
   return [...byTime.values()];
 }
@@ -527,6 +562,7 @@ function bookingResolutionDiagnostics(bookings) {
 }
 
 function slotAppliesOnDate(slot, dateISO, day) {
+  if (isDeletedSlotRecord(slot)) return false;
   if (slot.date) return dateOnly(slot.date) === dateISO;
   return slot.day === day &&
     (!slot.startDate || dateOnly(slot.startDate) <= dateISO) &&
@@ -539,7 +575,7 @@ function teacherDateTimeKey(teacherId, dateISO, time) {
 
 function latestOverridesForDate(teacher, dateISO, day) {
   const byCell = new Map();
-  (teacher.overrideSlots || [])
+  activeSlotRecords(teacher.overrideSlots)
     .filter(slot => slotAppliesOnDate(slot, dateISO, day))
     .map(slot => ({ ...slot, time: normalizeTime(slot.time) }))
     .filter(slot => slot.time)
@@ -565,7 +601,7 @@ function collectTeacherSlotsForDate(teacher, dateISO) {
   const day = dayName(dateISO);
   const latestOverrides = latestOverridesForDate(teacher, dateISO, day);
   const keptRegularKeys = new Set();
-  const regular = (teacher.regularSlots || [])
+  const regular = activeSlotRecords(teacher.regularSlots)
     .filter(slot => slot.day === day)
     .filter(slot => (!slot.startDate || dateOnly(slot.startDate) <= dateISO) && (!slot.endDate || dateOnly(slot.endDate) >= dateISO))
     .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }))
