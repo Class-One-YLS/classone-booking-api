@@ -530,6 +530,69 @@ function testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate() {
   assert.equal(nextWeek.available, true);
 }
 
+function testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate() {
+  const teacher = baseTeacher({
+    id: "teacher_8szcinnrmr1oxt60",
+    name: "Chei Leng",
+    regularSlots: [{
+      id: "slot_bxygfjwqmr1s7o25",
+      day: "Saturday",
+      time: "11:30",
+      locked: true,
+      studentId: "student_dt0km6bamr1rf59m",
+      studentName: "Alynna Gan Shin Yi",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-07-01",
+      endDate: "",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }]
+  });
+  const cells = resolveTeacherCalendar({
+    teachers: [teacher],
+    students: [],
+    bookings: [{
+      id: "manual_teacher_8szcinnrmr1oxt60_2026-07-25_11_30_slot_bxygfjwqmr1s7o25",
+      teacherId: "teacher_8szcinnrmr1oxt60",
+      source: "fixed_regular_manual",
+      sourceSlotId: "slot_bxygfjwqmr1s7o25",
+      recurringSourceSlotId: "slot_bxygfjwqmr1s7o25",
+      date: "2026-07-25",
+      day: "Saturday",
+      time: "11:30",
+      studentId: "student_dt0km6bamr1rf59m",
+      studentName: "Alynna Gan Shin Yi",
+      subject: "CN",
+      type: "regular class",
+      status: "deleted",
+      deleted: true,
+      archived: true,
+      cancelledAt: "2026-07-21T02:10:00.000Z",
+      deletedAt: "2026-07-21T02:15:30.142Z",
+      supersededByBookingId: "booking_2r22csuumrrj5vnn",
+      outcomeSource: "admin_cancellation",
+      replacementCreditCreated: true,
+      updatedAt: "2026-07-21T02:15:30.142Z",
+      createdAt: "2026-07-20T00:00:00.000Z"
+    }]
+  }, {
+    teacher,
+    teacherId: teacher.id,
+    from: "2026-07-25",
+    to: "2026-08-01",
+    stateVersion: 1
+  }).cells;
+  const cancelledOccurrence = cells.find(item => item.cellKey === teacherDateTimeKey(teacher.id, "2026-07-25", "11:30"));
+  assert.equal(cancelledOccurrence && cancelledOccurrence.studentName, "Alynna Gan Shin Yi");
+  assert.equal(cancelledOccurrence && cancelledOccurrence.status, "cancelled");
+  assert.equal(cancelledOccurrence && cancelledOccurrence.bookingId, "manual_teacher_8szcinnrmr1oxt60_2026-07-25_11_30_slot_bxygfjwqmr1s7o25");
+
+  const nextRecurring = cells.find(item => item.cellKey === teacherDateTimeKey(teacher.id, "2026-08-01", "11:30"));
+  assert.equal(nextRecurring && nextRecurring.studentName, "Alynna Gan Shin Yi");
+  assert.equal(nextRecurring && nextRecurring.status, "booked");
+  assert.equal(nextRecurring && nextRecurring.bookingId, "");
+}
+
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
@@ -539,5 +602,6 @@ testStudentNotShowDisplaysLatestStatus();
 testSetOffSupersedesOlderBooking();
 testResolvedCellParityCases();
 testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate();
+testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate();
 
 console.log("calendar-resolver stability tests passed");
