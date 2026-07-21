@@ -3,6 +3,7 @@ const { setCors, sendJson, handleOptions, safeError } = require("../lib/http");
 const {
   bookingAmendmentTime,
   isDeletedBooking,
+  normalizeClassStatus,
   resolveBookingRecords
 } = require("../lib/booking-resolution");
 const calendarResolver = require("../lib/calendar-resolver");
@@ -520,6 +521,8 @@ function bookingDebugRecord(booking, selected = false, reason = "") {
     bookingId: booking.id || "",
     studentName: booking.studentName || "",
     status: booking.status || "booked",
+    normalizedStatus: normalizeClassStatus(booking) || booking.status || "booked",
+    outcome: booking.outcome || booking.classOutcome || booking.finalStatus || "",
     classType: booking.type || "regular class",
     createdAt: booking.createdAt || booking.created_at || "",
     updatedAt: booking.updatedAt || booking.updated_at || "",
@@ -655,7 +658,7 @@ function teacherLeaveOffSlotFromCell(slot, leave) {
 }
 
 function publicCellFromBooking(booking, teacher, state) {
-  const status = booking.status || "booked";
+  const status = normalizeClassStatus(booking) || booking.status || "booked";
   const date = dateOnly(booking.date);
   const time = normalizeTime(booking.time);
   return {
@@ -952,10 +955,20 @@ async function loadState(req, from, to) {
       end as teacher,
       coalesce((
         select jsonb_agg(booking.value)
-        from jsonb_array_elements(coalesce(source.data->'bookings', '[]'::jsonb)) as booking(value)
-        where (booking.value->>'teacherId' = teacher_match.teacher->>'id'
-          or (booking.value->>'source' = 'fixed_regular_snapshot' and booking.value->>'id' like ('history_' || (teacher_match.teacher->>'id') || '_%')))
-          and coalesce(booking.value->>'status', '') <> 'deleted'
+          from jsonb_array_elements(coalesce(source.data->'bookings', '[]'::jsonb)) as booking(value)
+          where (booking.value->>'teacherId' = teacher_match.teacher->>'id'
+            or (booking.value->>'source' = 'fixed_regular_snapshot' and booking.value->>'id' like ('history_' || (teacher_match.teacher->>'id') || '_%')))
+          and (
+            coalesce(booking.value->>'status', '') <> 'deleted'
+            or lower(coalesce(
+              booking.value->>'outcome',
+              booking.value->>'finalStatus',
+              booking.value->>'classOutcome',
+              booking.value->>'outcomeStatus',
+              booking.value->>'businessStatus',
+              ''
+            )) in ('cancel', 'cancelled', 'canceled')
+          )
           and (
             booking.value->>'source' = 'fixed_regular_snapshot'
             or (${from} = '' or left(coalesce(booking.value->>'date', ''), 10) >= ${from})
