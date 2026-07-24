@@ -593,6 +593,101 @@ function testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate() {
   assert.equal(nextRecurring && nextRecurring.bookingId, "");
 }
 
+function testMovedSourceAndDestinationKeepSeparateOccurrenceIds() {
+  const sourceId = "manual_teacher_peggy_2026-07-24_20_00_slot_friday_2000";
+  const destinationId = "booking_move_destination_1";
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "slot_friday_2000",
+      day: "Friday",
+      time: "20:00",
+      locked: true,
+      studentId: "student_tan_yii_tung",
+      studentName: "Tan Yii Tung",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-07-01",
+      endDate: "",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    bookings: [{
+      id: sourceId,
+      teacherId: "teacher_peggy",
+      source: "fixed_regular_manual",
+      sourceSlotId: "slot_friday_2000",
+      recurringSourceSlotId: "slot_friday_2000",
+      occurrenceDate: "2026-07-24",
+      occurrenceKey: "slot_friday_2000|2026-07-24",
+      suppressRecurringOccurrence: true,
+      resolutionActive: true,
+      resolutionStatus: "cancelled",
+      outcomeSource: "drag_move",
+      recordRole: "move_source",
+      moveTransactionId: "move_transaction_1",
+      movedToBookingId: destinationId,
+      movedToDate: "2026-07-23",
+      movedToTime: "21:00",
+      date: "2026-07-24",
+      day: "Friday",
+      time: "20:00",
+      studentId: "student_tan_yii_tung",
+      studentName: "Tan Yii Tung",
+      subject: "CN",
+      type: "regular class",
+      status: "cancelled",
+      cancelledAt: "2026-07-20T10:00:00.000Z",
+      updatedAt: "2026-07-20T10:00:00.000Z",
+      createdAt: "2026-07-20T10:00:00.000Z"
+    }, {
+      id: destinationId,
+      teacherId: "teacher_peggy",
+      source: "moved_booking",
+      recordRole: "move_destination",
+      exactDateBooking: true,
+      moveTransactionId: "move_transaction_1",
+      movedFromOccurrenceId: sourceId,
+      movedFromRecurringClassId: "slot_friday_2000",
+      movedFromDate: "2026-07-24",
+      movedFromTime: "20:00",
+      changedSlot: {
+        fromDate: "2026-07-24",
+        fromTime: "20:00",
+        changedAt: "2026-07-20T10:00:01.000Z"
+      },
+      date: "2026-07-23",
+      day: "Thursday",
+      time: "21:00",
+      studentId: "student_tan_yii_tung",
+      studentName: "Tan Yii Tung",
+      subject: "CN",
+      type: "regular class",
+      status: "booked",
+      updatedAt: "2026-07-20T10:00:01.000Z",
+      createdAt: "2026-07-20T10:00:01.000Z"
+    }]
+  }, "2026-07-23", "2026-07-24");
+
+  const sourceCell = cell(cells, "2026-07-24", "20:00");
+  const destinationCell = cell(cells, "2026-07-23", "21:00");
+
+  assert.equal(sourceCell && sourceCell.bookingId, sourceId);
+  assert.equal(sourceCell && sourceCell.status, "cancelled");
+  assert.equal(sourceCell && sourceCell.recordRole, "move_source");
+  assert.equal(sourceCell && sourceCell.occurrenceId, "occurrence:slot_friday_2000|2026-07-24");
+
+  assert.equal(destinationCell && destinationCell.bookingId, destinationId);
+  assert.equal(destinationCell && destinationCell.status, "booked");
+  assert.equal(destinationCell && destinationCell.recordRole, "move_destination");
+  assert.equal(destinationCell && destinationCell.occurrenceId, `booking:${destinationId}`);
+
+  assert.notEqual(sourceCell && sourceCell.occurrenceId, destinationCell && destinationCell.occurrenceId);
+  assert.notEqual(sourceCell && sourceCell.bookingId, destinationCell && destinationCell.bookingId);
+}
+
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
@@ -603,5 +698,6 @@ testSetOffSupersedesOlderBooking();
 testResolvedCellParityCases();
 testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate();
 testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate();
+testMovedSourceAndDestinationKeepSeparateOccurrenceIds();
 
 console.log("calendar-resolver stability tests passed");

@@ -1069,6 +1069,11 @@ module.exports = async function handler(req, res) {
       .map(cell => ({
         id: cell.bookingId || cell.id || "",
         bookingId: cell.bookingId || "",
+        recordId: cell.recordId || cell.bookingId || cell.id || "",
+        occurrenceId: cell.occurrenceId || "",
+        occurrenceKey: cell.occurrenceKey || "",
+        recordRole: cell.recordRole || "",
+        moveTransactionId: cell.moveTransactionId || "",
         sourceRecordId: cell.sourceRecordId || cell.bookingId || "",
         teacherId: cell.teacherId || teacher.id,
         studentId: cell.studentId || "",
