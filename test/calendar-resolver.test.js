@@ -688,6 +688,87 @@ function testMovedSourceAndDestinationKeepSeparateOccurrenceIds() {
   assert.notEqual(sourceCell && sourceCell.bookingId, destinationCell && destinationCell.bookingId);
 }
 
+function testActiveRegularSlotBeatsCancelledHistoricalBookingAtSameCell() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "slot_student_b_regular",
+      day: "Monday",
+      time: "16:00",
+      locked: true,
+      studentId: "student_b",
+      studentName: "Student B",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-10T08:00:00.000Z"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    bookings: [{
+      id: "cancelled_student_a",
+      teacherId: "teacher_peggy",
+      date: "2026-07-13",
+      time: "16:00",
+      studentId: "student_a",
+      studentName: "Student A",
+      subject: "CN",
+      type: "trial class",
+      status: "cancelled",
+      cancelledAt: "2026-07-13T09:00:00.000Z",
+      updatedAt: "2026-07-13T09:00:00.000Z",
+      createdAt: "2026-07-13T08:00:00.000Z"
+    }]
+  }, "2026-07-13", "2026-07-13");
+
+  const resolved = cell(cells, "2026-07-13", "16:00");
+  assert.equal(resolved && resolved.studentName, "Student B");
+  assert.equal(resolved && resolved.type, "regular class");
+  assert.equal(resolved && resolved.status, "booked");
+  assert.equal(resolved && resolved.bookingId, "");
+}
+
+function testActiveDirectBookingBeatsCancelledHistoricalBookingAtSameCell() {
+  const teacher = baseTeacher();
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    bookings: [{
+      id: "cancelled_student_a_direct",
+      teacherId: "teacher_peggy",
+      date: "2026-07-13",
+      time: "17:00",
+      studentId: "student_a",
+      studentName: "Student A",
+      subject: "CN",
+      type: "trial class",
+      status: "cancelled",
+      cancelledAt: "2026-07-13T10:00:00.000Z",
+      updatedAt: "2026-07-13T10:00:00.000Z",
+      createdAt: "2026-07-13T09:00:00.000Z"
+    }, {
+      id: "booked_student_b_direct",
+      teacherId: "teacher_peggy",
+      date: "2026-07-13",
+      time: "17:00",
+      studentId: "student_b",
+      studentName: "Student B",
+      subject: "CN",
+      type: "regular class",
+      status: "booked",
+      updatedAt: "2026-07-13T09:30:00.000Z",
+      createdAt: "2026-07-13T09:30:00.000Z"
+    }]
+  }, "2026-07-13", "2026-07-13");
+
+  const resolved = cell(cells, "2026-07-13", "17:00");
+  assert.equal(resolved && resolved.studentName, "Student B");
+  assert.equal(resolved && resolved.type, "regular class");
+  assert.equal(resolved && resolved.status, "booked");
+  assert.equal(resolved && resolved.bookingId, "booked_student_b_direct");
+}
+
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
@@ -699,5 +780,7 @@ testResolvedCellParityCases();
 testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate();
 testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate();
 testMovedSourceAndDestinationKeepSeparateOccurrenceIds();
+testActiveRegularSlotBeatsCancelledHistoricalBookingAtSameCell();
+testActiveDirectBookingBeatsCancelledHistoricalBookingAtSameCell();
 
 console.log("calendar-resolver stability tests passed");
