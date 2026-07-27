@@ -1055,7 +1055,7 @@ module.exports = async function handler(req, res) {
       .filter(booking => booking.teacherId === teacher.id)
       .map(booking => repairFixedSnapshotBooking(booking))
       .filter(booking => dateRangeMatches(booking.date, from, to));
-    const resolvedCalendar = calendarResolver.resolveTeacherCalendar(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
+    const resolvedCalendar = calendarResolver.resolveOccurrences(state, { teacher, teacherId: teacher.id, from, to, stateVersion: Number(row.version || 0) });
     const cells = resolvedCalendar.cells;
     const selectedMonth = Number.isFinite(Number(req.query && req.query.month))
       ? Number(req.query.month)
