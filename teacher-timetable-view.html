@@ -1,0 +1,2864 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Class One Teacher Timetable</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <style>
+    :root {
+      --mint: #72D0A1;
+      --mint-dark: #24895d;
+      --ink: #17212b;
+      --muted: #667085;
+      --line: #d7e5dd;
+      --paper: #f4fbf7;
+      --danger: #d92d20;
+      --warning: #fff2a8;
+      --new-yellow: #fff8cf;
+      --blue: #dceafe;
+      --purple: #e8dcff;
+      --grey: #d0d5dd;
+      --class-regular-bg: #ffffff;
+      --class-regular-border: #d7e5dd;
+      --class-replacement-bg: #dceafe;
+      --class-exam-bg: #fff8cf;
+      --class-assessment-bg: #ffe7b3;
+      --class-trial-bg: #fff2a8;
+      --class-new-bg: #fff8cf;
+      --class-extra-bg: #e8dcff;
+      --class-practical-bg: #9080AE;
+      --class-cancelled-bg: #d0d5dd;
+      --class-not-show-bg: #ffe0df;
+      --class-not-show-text: #7a271a;
+      --class-off-bg: #666666;
+      --class-completed-badge-bg: #22c55e;
+      --class-completed-regular-bg: #dcf8ea;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { border: 0; cursor: pointer; }
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 16px clamp(14px, 4vw, 34px);
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand img { width: 142px; max-width: 36vw; height: auto; display: block; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(18px, 3vw, 26px); line-height: 1.1; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    h3 { font-size: 15px; }
+    .header-status {
+      margin-top: 4px;
+      color: var(--mint-dark);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    main {
+      width: min(1380px, 100%);
+      margin: 0 auto;
+      padding: 18px clamp(12px, 3vw, 28px) 40px;
+    }
+    .teacher-chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: #fff;
+      color: var(--mint-dark);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .sync-chip {
+      color: var(--muted);
+      background: #f8fffb;
+      font-weight: 700;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(150px, 1fr)) auto;
+      gap: 12px;
+      align-items: end;
+      margin: 16px 0;
+    }
+    .view-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 16px 0;
+    }
+    .view-tab {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 12px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 900;
+    }
+    .view-tab.active {
+      background: var(--mint);
+      border-color: var(--mint);
+      color: #0f3324;
+    }
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    select, input {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: #fff;
+      color: var(--ink);
+    }
+    textarea {
+      width: 100%;
+      min-height: 70px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: #fff;
+      color: var(--ink);
+      resize: vertical;
+      font: inherit;
+    }
+    .btn {
+      min-height: 42px;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: var(--mint);
+      color: #0f3324;
+      font-weight: 900;
+      transition: transform .12s ease, filter .12s ease;
+    }
+    .btn:active { transform: translateY(1px) scale(.98); filter: brightness(.97); }
+    .status {
+      margin: 12px 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .status.error { border-color: #f1b4ae; background: #fff3f2; color: #912018; }
+    .status.warn { border-color: #f3d28a; background: #fff8e6; color: #7a4b00; }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .metrics { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .metric {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .metric strong { display: block; margin-top: 8px; font-size: 26px; }
+    section {
+      margin-top: 16px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .timetable-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .teacher-timetable {
+      min-width: 1060px;
+      table-layout: fixed;
+    }
+    .month-calendar {
+      display: grid;
+      gap: 16px;
+    }
+    .week-navigation {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) 44px;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+      touch-action: pan-y;
+    }
+    .week-navigation .btn { width: 44px; padding: 0; font-size: 25px; }
+    .week-navigation-label { text-align: center; min-width: 0; }
+    .week-navigation-label strong { display: block; font-size: 15px; }
+    .week-navigation-label span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .calendar-mode-bar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin: -4px 0 14px;
+    }
+    .calendar-mode-switch {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+    }
+    .calendar-mode-btn {
+      min-height: 32px;
+      border-radius: 999px;
+      padding: 7px 13px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 900;
+    }
+    .calendar-mode-btn.active,
+    .calendar-mode-btn[aria-pressed="true"] {
+      background: var(--mint);
+      color: #0f3324;
+    }
+    .monthly-view-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .monthly-view-toolbar {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) auto 44px;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .monthly-view-toolbar .btn {
+      min-height: 38px;
+      padding: 8px 11px;
+    }
+    .monthly-view-title {
+      text-align: center;
+      min-width: 0;
+    }
+    .monthly-view-title strong {
+      display: block;
+      font-size: 17px;
+    }
+    .monthly-view-title span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .monthly-calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--line);
+      gap: 1px;
+    }
+    .monthly-calendar-weekday,
+    .monthly-calendar-day {
+      background: #fff;
+    }
+    .monthly-calendar-weekday {
+      padding: 8px 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .monthly-calendar-day {
+      min-height: 118px;
+      padding: 8px;
+      text-align: left;
+      border: 0;
+      color: var(--ink);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      align-content: start;
+      gap: 5px;
+    }
+    .monthly-calendar-day.outside-month {
+      opacity: 1;
+      background: #f7faf8;
+      color: #98a2b3;
+    }
+    .monthly-calendar-day.today {
+      box-shadow: inset 0 0 0 2px rgba(36, 137, 93, .28);
+    }
+    .monthly-calendar-day.selected {
+      background: #e8f8f0;
+      box-shadow: inset 0 0 0 2px var(--mint);
+    }
+    .monthly-calendar-day.has-classes {
+      cursor: pointer;
+    }
+    .monthly-date-number {
+      font-size: 15px;
+      font-weight: 950;
+      line-height: 1;
+    }
+    .monthly-class-count {
+      color: var(--mint-dark);
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .monthly-preview-list {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      align-self: start;
+    }
+    .monthly-preview-item {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 2px 5px;
+      border-radius: 6px;
+      background: #f1f7f3;
+      color: var(--ink);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .monthly-preview-more {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+    }
+    .monthly-selected-panel {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .monthly-selected-panel h3 {
+      font-size: 17px;
+      margin: 0;
+    }
+    .monthly-selected-panel .cards {
+      grid-template-columns: 1fr;
+    }
+    body.teacher-calendar-monthly #dailyNavigatorSection,
+    body.teacher-calendar-monthly #monthCalendarSection,
+    body.teacher-calendar-monthly #monthlySection {
+      display: none;
+    }
+    body.teacher-calendar-weekly #monthlyCalendarViewSection {
+      display: none;
+    }
+    body.teacher-calendar-weekly #expandedMonthViewSection,
+    body.teacher-calendar-monthly #expandedMonthViewSection,
+    body.teacher-calendar-expanded #dailyNavigatorSection,
+    body.teacher-calendar-expanded #monthCalendarSection,
+    body.teacher-calendar-expanded #monthlySection,
+    body.teacher-calendar-expanded #monthlyCalendarViewSection {
+      display: none;
+    }
+    .expanded-month-weeks {
+      display: grid;
+      gap: 18px;
+    }
+    .expanded-month-week {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      animation: week-in .18s ease;
+    }
+    .expanded-month-week.is-current-week {
+      border-color: var(--mint);
+      box-shadow: 0 0 0 2px rgba(114, 208, 161, .18);
+    }
+    .expanded-month-week-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 11px 12px;
+      background: #f8fffb;
+      color: var(--ink);
+      border-bottom: 1px solid var(--line);
+    }
+    .expanded-month-week-header strong {
+      display: block;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+    .expanded-month-week-header span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .expanded-month-week-header .pill {
+      justify-self: end;
+      white-space: nowrap;
+    }
+    .expanded-month-week .timetable-wrap { border: 0; border-radius: 0; }
+    .month-week {
+      display: grid;
+      gap: 8px;
+      animation: week-in .18s ease;
+    }
+    @keyframes week-in { from { opacity: .45; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+    .month-week h3 {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      color: var(--mint-dark);
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #111;
+      padding: 5px 6px;
+      text-align: center;
+      vertical-align: middle;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    th {
+      background: #f59e0b;
+      color: #111;
+      font-weight: 900;
+    }
+    .time-col {
+      width: 92px;
+      background: #fff4cf;
+      font-weight: 900;
+    }
+    .cell-off {
+      background: var(--class-off-bg);
+      color: #d8d8d8;
+      font-style: italic;
+      font-weight: 900;
+    }
+    .outside-month {
+      opacity: .48;
+    }
+    .cell-open { background: #fff; color: #98a2b3; }
+    .cell-fixed, .cell-booking {
+      background: var(--class-regular-bg);
+      color: #111;
+      font-weight: 800;
+    }
+    .cell-fixed, .cell-booking, .class-card { border-color: var(--class-regular-border); }
+    .type-exam { background: var(--class-exam-bg); }
+    .type-assessment { background: var(--class-assessment-bg); }
+    .type-trial, .type-trial-class, .type-new-trial { background: var(--class-trial-bg); }
+    .type-new, .type-new-students { background: var(--class-new-bg); }
+    .type-replacement-class { background: var(--class-replacement-bg); }
+    .type-extra-class { background: var(--class-extra-bg); }
+    .type-practical-class { background: var(--class-practical-bg); color: #fff; }
+    .type-practical-class .cell-small,
+    .type-practical-class .subtle,
+    .type-practical-class .class-time { color: #fff; }
+    .type-reserve { background: var(--class-replacement-bg); }
+    .status-completed { box-shadow: inset 0 0 0 2px rgba(34,197,94,.18); }
+    .cell-fixed.status-completed.type-regular-class,
+    .cell-booking.status-completed.type-regular-class,
+    .class-card.is-passed.type-regular-class { background: var(--class-completed-regular-bg); }
+    .status-student-not-show { background: var(--class-not-show-bg); color: var(--class-not-show-text); }
+    .status-student-not-show .cell-small,
+    .status-student-not-show .subtle,
+    .status-student-not-show .class-time { color: var(--class-not-show-text); }
+    .status-cancelled, .status-public-holiday, .status-teacher-leave { background: var(--class-cancelled-bg); color: #111; }
+    .completed-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 17px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: var(--class-completed-badge-bg);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1;
+      margin: 2px 0 3px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 17px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: #edf4f0;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1;
+      margin: 2px 0 3px;
+    }
+    .status-badge.status-completed { background: var(--class-completed-badge-bg); color: #fff; }
+    .status-badge.status-cancelled,
+    .status-badge.status-public-holiday,
+    .status-badge.status-teacher-leave { background: #667085; color: #fff; }
+    .status-badge.status-student-not-show { background: #b42318; color: #fff; }
+    .cell-student-name {
+      display: block;
+      font-size: 16px;
+      line-height: 1.15;
+      font-weight: 950;
+      overflow-wrap: anywhere;
+    }
+    .cell-class-details {
+      display: block;
+      margin-top: 2px;
+      color: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.15;
+      overflow-wrap: anywhere;
+    }
+    .cell-small {
+      display: block;
+      margin-top: 2px;
+      color: inherit;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 10px;
+    }
+    .class-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: var(--class-regular-bg);
+    }
+    .class-card.is-passed {
+      border-color: var(--class-regular-border);
+    }
+    .class-card.is-passed .class-time,
+    .class-card.is-passed .subtle { color: var(--muted); }
+    .class-card.is-not-show { border-color: #f1b4ae; background: var(--class-not-show-bg); color: var(--class-not-show-text); }
+    .class-card.is-not-show .class-time,
+    .class-card.is-not-show .subtle { color: var(--class-not-show-text); }
+    .class-card.is-not-show .pill { background: #fff; color: var(--class-not-show-text); }
+    .class-card strong { display: block; margin: 2px 0; font-size: 16px; line-height: 1.15; overflow-wrap: anywhere; }
+    .class-time {
+      margin-top: 4px;
+      color: var(--mint-dark);
+      font-size: 14px;
+      line-height: 1.2;
+      font-weight: 900;
+    }
+    .subtle { color: var(--muted); font-size: 13px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #e8f8f0;
+      color: var(--mint-dark);
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .daily-navigator {
+      display: grid;
+      gap: 12px;
+      touch-action: pan-y;
+    }
+    .daily-nav-header {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) 44px;
+      align-items: center;
+      gap: 10px;
+    }
+    .daily-nav-header .btn {
+      width: 44px;
+      padding: 0;
+      font-size: 25px;
+    }
+    .daily-date-label {
+      text-align: center;
+      min-width: 0;
+    }
+    .daily-date-label strong {
+      display: block;
+      font-size: clamp(16px, 2.4vw, 22px);
+      line-height: 1.15;
+    }
+    .daily-date-label span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .daily-week-strip {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .daily-day-button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 4px;
+      background: #fbfefd;
+      color: var(--ink);
+      font-weight: 900;
+      min-height: 54px;
+    }
+    .daily-day-button span,
+    .daily-day-button strong {
+      display: block;
+      line-height: 1.15;
+    }
+    .daily-day-button span {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .daily-day-button strong {
+      margin-top: 3px;
+      font-size: 15px;
+    }
+    .daily-day-button .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      margin: 5px auto 0;
+      background: #cbd5e1;
+    }
+    .daily-day-button.has-classes .dot { background: var(--mint-dark); }
+    .daily-day-button.active {
+      background: var(--mint);
+      border-color: var(--mint);
+      color: #0f3324;
+    }
+    .daily-day-button.active span { color: #0f3324; }
+    .daily-list-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .daily-list-shell {
+      min-height: 120px;
+      overflow: hidden;
+    }
+    .daily-list {
+      animation-duration: .23s;
+      animation-timing-function: ease;
+      animation-fill-mode: both;
+    }
+    .daily-list.slide-next { animation-name: daily-slide-next; }
+    .daily-list.slide-prev { animation-name: daily-slide-prev; }
+    .daily-list.slide-still { animation-name: daily-fade; }
+    @keyframes daily-slide-next {
+      from { opacity: .2; transform: translateX(32px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes daily-slide-prev {
+      from { opacity: .2; transform: translateX(-32px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes daily-fade {
+      from { opacity: .35; }
+      to { opacity: 1; }
+    }
+    .daily-empty {
+      display: grid;
+      grid-column: 1 / -1;
+      justify-items: center;
+      gap: 8px;
+      padding: 24px 12px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #fbfefd;
+      color: var(--muted);
+      text-align: center;
+      font-weight: 800;
+    }
+    .daily-empty strong {
+      color: var(--ink);
+      font-size: 18px;
+    }
+    .simple-table { min-width: 760px; }
+    .student-table { min-width: 900px; }
+    .simple-table th { background: #e8f8f0; }
+    .simple-table td, .simple-table th { border-color: var(--line); text-align: left; }
+    .claim-toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(140px, 1fr)) auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .claim-fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .claim-rewards { display: grid; gap: 10px; }
+    .claim-reward {
+      display: grid;
+      grid-template-columns: minmax(210px, .8fr) minmax(0, 1.4fr);
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfefd;
+    }
+    .claim-check {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+    }
+    .claim-check input { width: 20px; min-height: 20px; margin: 0; }
+    .claim-reward-fields {
+      display: grid;
+      grid-template-columns: 100px minmax(0, 1fr);
+      gap: 10px;
+    }
+    .claim-reward-fields.single { grid-template-columns: 1fr; }
+    .claim-reward-fields[aria-disabled="true"] { opacity: .48; }
+    .claim-summary { min-width: 820px; }
+    .claim-summary tfoot td { background: #e8f8f0; font-weight: 900; }
+    .claim-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .btn.ghost { background: #edf4f0; color: var(--ink); }
+    .hide { display: none !important; }
+    @media (max-width: 860px) {
+      .topbar { grid-template-columns: 1fr; }
+      .top-actions { justify-content: flex-start; }
+      .teacher-chip { justify-self: start; }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .toolbar .btn { grid-column: span 2; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .claim-reward { grid-template-columns: 1fr; }
+      .monthly-view-shell { grid-template-columns: 1fr; }
+      .monthly-calendar-day { min-height: 94px; padding: 7px; }
+      .monthly-preview-item { display: none; }
+      .monthly-preview-more { display: block; }
+    }
+    @media (max-width: 560px) {
+      .toolbar, .metrics { grid-template-columns: 1fr; }
+      .toolbar .btn { grid-column: auto; }
+      .brand { align-items: flex-start; flex-direction: column; }
+      section { padding: 12px; }
+      .claim-toolbar, .claim-fields, .claim-reward-fields { grid-template-columns: 1fr; }
+      .calendar-mode-bar { justify-content: stretch; }
+      .calendar-mode-switch { width: 100%; }
+      .calendar-mode-btn { flex: 1 1 0; }
+      .monthly-view-toolbar { grid-template-columns: 40px minmax(0, 1fr) 56px 40px; gap: 6px; }
+      .monthly-view-toolbar .btn { min-height: 36px; padding: 7px 8px; }
+      .monthly-calendar-weekday { font-size: 10px; padding: 7px 2px; }
+      .monthly-calendar-day { min-height: 70px; padding: 5px; gap: 3px; }
+      .monthly-date-number { font-size: 13px; }
+      .monthly-class-count { font-size: 10px; }
+      .expanded-month-week-header { grid-template-columns: minmax(0, 1fr); }
+      .expanded-month-week-header .pill { justify-self: start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="classone-logo.jpeg" alt="Class One">
+      <div>
+        <h1>Teacher Timetable View</h1>
+        <p class="subtle">Read-only monthly timetable</p>
+        <p class="header-status" id="headerStatusText">Loading latest timetable...</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="teacher-chip" id="teacherChip">Loading...</div>
+      <div class="teacher-chip sync-chip" id="syncChip">Auto-sync starting</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="status hide" id="statusText"></div>
+    <details class="status hide" id="apiDebugPanel">
+      <summary><strong>API Connection Details</strong></summary>
+      <div id="apiDebugDetails" class="subtle" style="margin-top:8px;"></div>
+    </details>
+    <div id="teacherDataContent" class="hide">
+    <div class="view-tabs">
+      <button class="view-tab active" data-view-tab="timetable">Timetable</button>
+      <button class="view-tab" data-view-tab="students">Students</button>
+      <button class="view-tab" data-view-tab="claims">Incentive Claim</button>
+    </div>
+
+    <div id="timetableView">
+    <div class="toolbar">
+      <div><label>Month</label><select id="monthSelect"></select></div>
+      <div><label>Year</label><select id="yearSelect"></select></div>
+      <button class="btn" id="refreshBtn">Refresh</button>
+    </div>
+
+    <div class="calendar-mode-bar" aria-label="Calendar view mode">
+      <div class="calendar-mode-switch" role="group" aria-label="Calendar view mode">
+        <button type="button" class="calendar-mode-btn active" id="weeklyCalendarModeBtn" data-calendar-mode="weekly" aria-pressed="true">Weekly</button>
+        <button type="button" class="calendar-mode-btn" id="monthlyCalendarModeBtn" data-calendar-mode="monthly" aria-pressed="false">Monthly</button>
+        <button type="button" class="calendar-mode-btn" id="expandedMonthModeBtn" data-calendar-mode="expanded" aria-pressed="false">Expanded Month</button>
+      </div>
+    </div>
+
+    <div class="grid metrics">
+      <div class="metric"><span>Classes In Selected Month</span><strong id="metricTotal">0</strong></div>
+      <div class="metric"><span>Today's Remaining Classes</span><strong id="metricUpcoming">0</strong></div>
+      <div class="metric"><span>Completed</span><strong id="metricCompleted">0</strong></div>
+      <div class="metric"><span>Not Show</span><strong id="metricNotShow">0</strong></div>
+      <div class="metric"><span>Cancelled</span><strong id="metricCancelled">0</strong></div>
+      <div class="metric"><span>Income To Date</span><strong id="metricIncome">RM 0.00</strong></div>
+    </div>
+
+    <section id="dailyNavigatorSection">
+      <div class="daily-navigator" id="dailyNavigator">
+        <div class="daily-nav-header">
+          <button class="btn ghost" id="previousDayBtn" title="Previous day" aria-label="Previous day">&lsaquo;</button>
+          <div class="daily-date-label">
+            <strong id="dailyDateLabel">Today</strong>
+            <span id="dailyDateContext">Loading classes...</span>
+          </div>
+          <button class="btn ghost" id="nextDayBtn" title="Next day" aria-label="Next day">&rsaquo;</button>
+        </div>
+        <div class="daily-week-strip" id="dailyWeekStrip" aria-label="Daily classes week strip"></div>
+        <div class="daily-list-title">
+          <h2 id="dailyClassesTitle">Today's Classes (0)</h2>
+          <span class="subtle" id="dailyCacheStatus">Loaded from monthly timetable</span>
+        </div>
+        <div class="daily-list-shell">
+          <div id="upcomingList" class="daily-list cards"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="monthCalendarSection">
+      <h2>Whole Month Calendar</h2>
+      <div class="week-navigation" id="weekNavigation" aria-label="Week navigation">
+        <button class="btn ghost" id="previousWeekBtn" title="Previous week" aria-label="Previous week">&lsaquo;</button>
+        <div class="week-navigation-label"><strong id="selectedWeekLabel">Loading week...</strong><span id="selectedWeekContext"></span></div>
+        <button class="btn ghost" id="nextWeekBtn" title="Next week" aria-label="Next week">&rsaquo;</button>
+      </div>
+      <div id="monthCalendar" class="month-calendar"></div>
+    </section>
+
+    <section id="monthlyCalendarViewSection">
+      <div class="monthly-view-toolbar" aria-label="Monthly calendar navigation">
+        <button class="btn ghost" id="previousMonthBtn" title="Previous month" aria-label="Previous month">&lsaquo;</button>
+        <div class="monthly-view-title"><strong id="monthlyCalendarTitle">Month Year</strong><span id="monthlyCalendarContext">Monthly View</span></div>
+        <button class="btn ghost" id="monthlyTodayBtn" title="Today" aria-label="Today">Today</button>
+        <button class="btn ghost" id="nextMonthBtn" title="Next month" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <div class="monthly-view-shell">
+        <div id="monthlyCalendarGrid" class="monthly-calendar-grid" aria-label="Monthly calendar"></div>
+        <aside class="monthly-selected-panel" aria-live="polite">
+          <div>
+            <h3 id="monthlySelectedDateTitle">Selected Day</h3>
+            <p class="subtle" id="monthlySelectedDateContext">Choose a date to view classes.</p>
+          </div>
+          <div id="monthlySelectedClasses" class="cards"></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="expandedMonthViewSection">
+      <div class="monthly-view-toolbar" aria-label="Expanded month navigation">
+        <button class="btn ghost" id="expandedPreviousMonthBtn" title="Previous month" aria-label="Previous month">&lsaquo;</button>
+        <div class="monthly-view-title"><strong id="expandedMonthTitle">Month Year</strong><span id="expandedMonthContext">Expanded Month</span></div>
+        <button class="btn ghost" id="expandedTodayBtn" title="Today" aria-label="Today">Today</button>
+        <button class="btn ghost" id="expandedNextMonthBtn" title="Next month" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <div id="expandedMonthWeeks" class="expanded-month-weeks"></div>
+    </section>
+
+    <section id="monthlySection">
+      <h2>Selected Month Classes</h2>
+      <div id="monthList" class="timetable-wrap"></div>
+    </section>
+
+    <section>
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <h2>Income History</h2>
+        <button class="btn ghost" id="exportIncomePdfBtn">Export Month PDF</button>
+      </div>
+      <div id="incomeBreakdownPanel" class="hide" style="margin-bottom:12px;"></div>
+      <div id="incomeList" class="timetable-wrap"></div>
+    </section>
+
+    <section>
+      <h2>Cancelled / Leave Summary</h2>
+      <div id="leaveList" class="timetable-wrap"></div>
+    </section>
+    </div>
+
+    <div id="studentsView" class="hide">
+      <section>
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+          <div>
+            <h2>Students</h2>
+            <p class="subtle">Current level and remarks auto-save to Class One database.</p>
+          </div>
+          <span class="pill" id="studentSaveStatus">Ready</span>
+        </div>
+        <div id="studentListTable" class="timetable-wrap" style="margin-top:12px;"></div>
+      </section>
+    </div>
+
+    <div id="claimsView" class="hide">
+      <section>
+        <div class="claim-toolbar">
+          <div><label>Claim Month</label><select id="claimMonthSelect"></select></div>
+          <div><label>Claim Year</label><select id="claimYearSelect"></select></div>
+          <button class="btn ghost" id="loadClaimBtn">Load Month</button>
+        </div>
+        <p class="subtle" id="claimLoadStatus" style="margin-top:10px;">Choose a month to prepare the claim.</p>
+      </section>
+
+      <section>
+        <h2>Payment Details</h2>
+        <div class="claim-fields">
+          <div><label>Email</label><input id="claimEmail" type="email" autocomplete="email" placeholder="Teacher email"></div>
+          <div><label>Account Name</label><input id="claimAccountName" placeholder="Bank account holder name"></div>
+          <div><label>Bank Name</label><input id="claimBankName" placeholder="Bank name"></div>
+          <div><label>Account Number</label><input id="claimAccountNumber" inputmode="numeric" placeholder="Bank account number"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Monthly Automatic Incentives</h2>
+        <div id="claimAutomaticSummary" class="timetable-wrap"></div>
+      </section>
+
+      <section>
+        <h2>Other Rewards</h2>
+        <div class="claim-rewards">
+          <div class="claim-reward">
+            <label class="claim-check"><input type="checkbox" id="claimBirthday"> Birthday Reward (RM10)</label>
+            <div class="claim-reward-fields single" id="claimBirthdayFields" aria-disabled="true">
+              <input id="claimBirthdayRemark" placeholder="Birthday date" disabled>
+            </div>
+          </div>
+          <div class="claim-reward">
+            <label class="claim-check"><input type="checkbox" id="claimBestTeacher"> Monthly Best Teacher Award (RM25)</label>
+            <div class="claim-reward-fields single" id="claimBestTeacherFields" aria-disabled="true">
+              <input id="claimBestTeacherRemark" placeholder="Award reference or remark" disabled>
+            </div>
+          </div>
+          <div class="claim-reward">
+            <label class="claim-check"><input type="checkbox" id="claimGoogleReview"> Google Review (RM20 each)</label>
+            <div class="claim-reward-fields" id="claimGoogleReviewFields" aria-disabled="true">
+              <input id="claimGoogleReviewQty" type="number" min="1" max="100" value="1" aria-label="Google review quantity" disabled>
+              <input id="claimGoogleReviewRemark" placeholder="Parent or reviewer name(s)" disabled>
+            </div>
+          </div>
+          <div class="claim-reward">
+            <label class="claim-check"><input type="checkbox" id="claimTrialEnrollment"> Trial to Enrollment (RM10 each)</label>
+            <div class="claim-reward-fields" id="claimTrialEnrollmentFields" aria-disabled="true">
+              <input id="claimTrialEnrollmentQty" type="number" min="1" max="100" value="1" aria-label="Trial enrollment quantity" disabled>
+              <input id="claimTrialEnrollmentRemark" placeholder="Student name(s)" disabled>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Claim Summary</h2>
+        <div id="claimSummary" class="timetable-wrap"></div>
+        <div class="claim-actions">
+          <button class="btn ghost" id="exportClaimPdfBtn">Export Claim PDF</button>
+          <button class="btn" id="saveClaimBtn">Save Claim</button>
+        </div>
+      </section>
+    </div>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const DEFAULT_API_BASE = "https://classone-booking-api-yiit.vercel.app";
+    function storedApiBase() {
+      try { return localStorage.getItem("classone_api_base") || ""; }
+      catch (error) { return ""; }
+    }
+    const API_BASE = String(params.get("apiBase") || window.CLASS_ONE_API_BASE || storedApiBase() || DEFAULT_API_BASE).trim().replace(/\/+$/, "");
+    const STATE_KEY = String(params.get("stateKey") || "production").trim() || "production";
+    const AUTO_SYNC_MS = 15000;
+    const LIST_PAGE_SIZE = 10;
+    const FIRST_VIEW_YEAR = 2026;
+    const FIRST_VIEW_MONTH = 5;
+    const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const STATUS_LABELS = {
+      booked: "Booked",
+      completed: "Completed",
+      student_not_show: "Student Not Show",
+      cancelled: "Cancelled",
+      public_holiday: "Public Holiday",
+      teacher_leave: "Teacher Leave",
+      reserved: "Reserved"
+    };
+    const CANCELLED = ["cancelled", "public_holiday", "teacher_leave"];
+    const $ = id => document.getElementById(id);
+    let timetableData = null;
+    let autoSyncTimer = null;
+    let autoSyncInProgress = false;
+    let lastAutoSyncAt = null;
+    let lastLoadedVersion = 0;
+    let selectedWeekStartISO = "";
+    let weekSwipeStart = null;
+    let selectedDailyDateISO = "";
+    let dailySwipeStart = null;
+    let dailySlideDirection = "still";
+    let calendarMode = "weekly";
+    let monthTimetableCache = new Map();
+    let studentSaveTimer = null;
+    let teacherStudentPage = 1;
+    let monthListPage = 1;
+    let leaveListPage = 1;
+    let incomeListPage = 1;
+    let incentiveClaimLoadedKey = "";
+    let incentiveClaimLoading = false;
+    let lastApiDebug = null;
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+
+    function localISO(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+
+    function getCurrentBusinessDate(reference = new Date()) {
+      const today = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      return {
+        todayISO: localISO(today),
+        currentMonth: today.getMonth(),
+        currentYear: today.getFullYear(),
+        currentWeekStart: localISO(weekStart),
+        currentWeekEnd: localISO(weekEnd)
+      };
+    }
+
+    function teacherViewSessionKey(key) {
+      return `classone_teacher_view_${teacherId || "unknown"}_${key}`;
+    }
+
+    function teacherViewSessionGet(key, fallback = "") {
+      try {
+        const value = sessionStorage.getItem(teacherViewSessionKey(key));
+        return value === null || value === "" ? fallback : value;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function teacherViewSessionSet(key, value) {
+      try { sessionStorage.setItem(teacherViewSessionKey(key), String(value ?? "")); } catch (error) {}
+    }
+
+    function teacherViewLocalGet(key, fallback = "") {
+      try {
+        const value = localStorage.getItem(key);
+        return value === null || value === "" ? fallback : value;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function teacherViewLocalSet(key, value) {
+      try { localStorage.setItem(key, String(value ?? "")); } catch (error) {}
+    }
+
+    function parseISODate(value) {
+      const [year, month, day] = String(value || "").split("-").map(Number);
+      return new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
+    }
+
+    function dateOnly(value) {
+      return String(value || "").split("T")[0].split(" ")[0];
+    }
+
+    function dateOffsetISO(value, days) {
+      const date = parseISODate(value);
+      date.setDate(date.getDate() + days);
+      return localISO(date);
+    }
+
+    function dateLabel(value) {
+      const date = parseISODate(value);
+      return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    }
+
+    function normalizeCalendarMode(value) {
+      if (value === "monthly-schedule") return "expanded";
+      return ["weekly", "monthly", "expanded"].includes(value) ? value : "weekly";
+    }
+
+    function rawTimePart(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (text.includes("T")) {
+        const match = text.match(/T(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (match) return `${match[1].padStart(2, "0")}:${match[2]}:${match[3] || "00"}`;
+      }
+      const ampm = text.match(/\b(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(AM|PM)\b/i);
+      if (ampm) {
+        let hour = Number(ampm[1]);
+        const minute = Number(ampm[2] || 0);
+        const second = Number(ampm[3] || 0);
+        const suffix = ampm[4].toUpperCase();
+        if (suffix === "PM" && hour !== 12) hour += 12;
+        if (suffix === "AM" && hour === 12) hour = 0;
+        return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+      }
+      const match = text.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+      if (match) return `${match[1].padStart(2, "0")}:${match[2]}:${match[3] || "00"}`;
+      return "";
+    }
+
+    function normalizeTime(value) {
+      const text = String(value || "").trim();
+      const sheetDateTime = text.match(/^1899-12-\d{2}T(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+      if (sheetDateTime) {
+        let total = (Number(sheetDateTime[1]) * 60) + Number(sheetDateTime[2]) + (Number(sheetDateTime[3] || 0) / 60);
+        total -= 83 + (18 / 60);
+        total = Math.round(total / 30) * 30;
+        if (total < 0) total = 0;
+        if (total >= 24 * 60) total = (24 * 60) - 30;
+        return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+      }
+      const part = rawTimePart(value);
+      if (!part) return "";
+      const [hour, minute, second] = part.split(":").map(Number);
+      if (Number.isNaN(hour) || Number.isNaN(minute)) return "";
+      let total = (hour * 60) + minute + (Number(second || 0) >= 30 ? 1 : 0);
+      total = Math.round(total / 30) * 30;
+      if (total >= 24 * 60) total = (24 * 60) - 30;
+      return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    }
+
+    function timeLabel(value) {
+      const text = normalizeTime(value) || String(value || "");
+      const match = text.match(/^(\d{1,2}):(\d{2})/);
+      if (!match) return text;
+      const hour = Number(match[1]);
+      const minute = match[2];
+      const suffix = hour >= 12 ? "PM" : "AM";
+      const displayHour = hour % 12 || 12;
+      return `${displayHour}:${minute} ${suffix}`;
+    }
+
+    function clockLabel(date = new Date()) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function money(value) {
+      return `RM ${Number(value || 0).toFixed(2)}`;
+    }
+
+    function minutes(value) {
+      const [hour, minute] = String(value || "00:00").split(":").map(Number);
+      return (Number(hour) || 0) * 60 + (Number(minute) || 0);
+    }
+
+    function statusLabel(status) {
+      return STATUS_LABELS[status] || status || "Booked";
+    }
+
+    function statusForDisplay(booking) {
+      if (!booking) return "";
+      return resolvedClassStatus(booking);
+    }
+
+    function statusClass(status) {
+      return `status-${String(status || "booked").replace(/_/g, "-")}`;
+    }
+
+    function typeClass(type) {
+      return `type-${String(type || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    }
+
+    function slotDateTime(date, time) {
+      const dateISO = dateOnly(date);
+      const dateMatch = dateISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const normalizedTime = normalizeTime(time) || "00:00";
+      const [hour, minute] = normalizedTime.split(":").map(Number);
+      if (!dateMatch || Number.isNaN(hour) || Number.isNaN(minute)) return new Date(NaN);
+      return new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]), hour, minute, 0, 0);
+    }
+
+    function classDurationMinutes(record = {}) {
+      const value = Number(record.minutes || record.duration || record.classMinutes || 25);
+      return Number.isFinite(value) && value > 0 ? value : 25;
+    }
+
+    function slotEndDateTime(record = {}) {
+      const start = slotDateTime(record.date, record.time);
+      if (Number.isNaN(start.getTime())) return start;
+      return new Date(start.getTime() + classDurationMinutes(record) * 60 * 1000);
+    }
+
+    function slotHasPassed(date, time, record = {}) {
+      const end = slotEndDateTime({ ...record, date, time });
+      return !Number.isNaN(end.getTime()) && end <= new Date();
+    }
+
+    function resolvedClassStatus(record = {}, reference = new Date()) {
+      const status = record.status || "booked";
+      if (status !== "booked" && status !== "completed") return status;
+      const start = slotDateTime(record.date, record.time);
+      if (Number.isNaN(start.getTime()) || start > reference) return "booked";
+      if (status === "completed") return "completed";
+      const end = slotEndDateTime(record);
+      return !Number.isNaN(end.getTime()) && end <= reference ? "completed" : "booked";
+    }
+
+    function setStatus(message, type = "") {
+      $("headerStatusText").textContent = message;
+      if (type === "error" || type === "warn") {
+        $("statusText").textContent = message;
+        $("statusText").className = `status ${type}`.trim();
+        $("statusText").classList.remove("hide");
+        return;
+      }
+      $("statusText").classList.add("hide");
+    }
+
+    function setSyncChip(message) {
+      $("syncChip").textContent = message;
+    }
+
+    function safeApiUrl(url) {
+      try {
+        const parsed = new URL(url);
+        if (parsed.searchParams.has("token")) parsed.searchParams.set("token", "[hidden]");
+        return parsed.toString();
+      } catch (error) {
+        return String(url || "").replace(/([?&]token=)[^&]+/i, "$1[hidden]");
+      }
+    }
+
+    function updateApiDebug({ url, teacherId, from = "", to = "", status = "pending", error = "" }) {
+      lastApiDebug = { url: safeApiUrl(url), teacherId, from, to, status, error };
+      const show = params.get("debug") === "1" || Boolean(error);
+      $("apiDebugPanel").classList.toggle("hide", !show);
+      $("apiDebugDetails").innerHTML = `
+        API URL: ${escapeHtml(lastApiDebug.url)}<br>
+        Teacher ID: ${escapeHtml(teacherId || "-")}<br>
+        Date range: ${escapeHtml(from || "-")} to ${escapeHtml(to || "-")}<br>
+        HTTP status: ${escapeHtml(String(status))}${error ? `<br>Error: ${escapeHtml(error)}` : ""}
+      `;
+    }
+
+    function teacherApiErrorMessage(error) {
+      const status = Number(error?.status || 0);
+      if (status === 401) return "Teacher link token is invalid or not synced yet.";
+      if (status === 404) return "Teacher timetable data not found.";
+      if (!status || /failed to fetch|networkerror|load failed/i.test(String(error?.message || ""))) {
+        return "Cannot connect to Class One API. Please check deployment/API URL.";
+      }
+      if (status >= 500) return `Cannot connect to Class One API. The deployed API returned HTTP ${status}.`;
+      return error?.message || "Unable to load timetable.";
+    }
+
+    async function fetchTeacherApi(url, { teacherId, from = "", to = "" } = {}) {
+      updateApiDebug({ url, teacherId, from, to, status: "pending" });
+      let response;
+      try {
+        response = await fetch(url, { method: "GET", cache: "no-store" });
+      } catch (error) {
+        updateApiDebug({ url, teacherId, from, to, status: 0, error: "Fetch failed" });
+        const wrapped = new Error("Cannot connect to Class One API. Please check deployment/API URL.");
+        wrapped.status = 0;
+        throw wrapped;
+      }
+      let data = {};
+      try {
+        const text = await response.text();
+        data = text ? JSON.parse(text) : {};
+      } catch (error) {
+        data = {};
+      }
+      if (!response.ok || data.ok === false) {
+        const wrapped = new Error(data.error || `HTTP ${response.status}`);
+        wrapped.status = response.status;
+        updateApiDebug({ url, teacherId, from, to, status: response.status, error: teacherApiErrorMessage(wrapped) });
+        throw wrapped;
+      }
+      updateApiDebug({ url, teacherId, from, to, status: response.status });
+      return data;
+    }
+
+    function showTimetableLoadFailure(error, autoSync = false) {
+      const message = teacherApiErrorMessage(error);
+      if (timetableData) {
+        $("teacherDataContent").classList.remove("hide");
+        setStatus(`Showing last loaded timetable. ${autoSync ? "Auto-sync failed. " : ""}${message}`, "warn");
+      } else {
+        $("teacherDataContent").classList.add("hide");
+        setStatus(`Unable to load timetable. ${message}`, "error");
+      }
+    }
+
+    function normalizeLoadedTimetable(data) {
+      data.regularSlots = (data.regularSlots || []).map(slot => ({ ...slot, time: normalizeTime(slot.time) || slot.time }));
+      data.overrideSlots = (data.overrideSlots || []).map(slot => ({ ...slot, time: normalizeTime(slot.time) || slot.time }));
+      data.bookings = (data.bookings || []).map(booking => ({ ...booking, time: normalizeTime(booking.time) || booking.time }));
+      const seenCellKeys = new Set();
+      const duplicateCellKeys = new Set();
+      data.cells = (data.cells || []).map(cell => {
+        const time = normalizeTime(cell.time) || cell.time;
+        const cellKey = cell.cellKey || `${cell.teacherId || data.teacher?.id || ""}|${cell.date || ""}|${time}`;
+        if (seenCellKeys.has(cellKey)) duplicateCellKeys.add(cellKey);
+        seenCellKeys.add(cellKey);
+        return { ...cell, time, cellKey };
+      });
+      if (duplicateCellKeys.size) console.warn("[Teacher View] duplicate resolved cell keys returned by API", [...duplicateCellKeys]);
+      data.students = (data.students || []).map((student, index) => ({
+        ...student,
+        no: index + 1,
+        currentLevel: student.currentLevel || "",
+        remark: student.remark || ""
+      }));
+      return data;
+    }
+
+    function availableMonthsForYear(year) {
+      const startMonth = Number(year) === FIRST_VIEW_YEAR ? FIRST_VIEW_MONTH : 0;
+      return MONTHS
+        .map((month, index) => ({ month, index }))
+        .filter(item => Number(year) > FIRST_VIEW_YEAR || item.index >= startMonth);
+    }
+
+    function fillMonthSelect(year, preferredMonth = null) {
+      const months = availableMonthsForYear(year);
+      $("monthSelect").innerHTML = months.map(item => `<option value="${item.index}">${item.month}</option>`).join("");
+      const fallback = months[0]?.index ?? FIRST_VIEW_MONTH;
+      const safeMonth = months.some(item => item.index === Number(preferredMonth)) ? Number(preferredMonth) : fallback;
+      $("monthSelect").value = String(safeMonth);
+    }
+
+    function fillControls() {
+      const current = getCurrentBusinessDate();
+      const currentYear = current.currentYear;
+      const startYear = FIRST_VIEW_YEAR;
+      const endYear = Math.max(currentYear + 4, FIRST_VIEW_YEAR + 4);
+      $("yearSelect").innerHTML = Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index).map(year => `<option value="${year}">${year}</option>`).join("");
+      const selectedMonth = Number(params.get("month") || teacherViewSessionGet("month", current.currentMonth));
+      const selectedYear = Math.max(FIRST_VIEW_YEAR, Number(params.get("year") || teacherViewSessionGet("year", currentYear)));
+      $("yearSelect").value = String(selectedYear);
+      fillMonthSelect(selectedYear, selectedMonth);
+      $("claimYearSelect").innerHTML = $("yearSelect").innerHTML;
+      const claimYear = Math.max(FIRST_VIEW_YEAR, Number(teacherViewSessionGet("claim_year", selectedYear)));
+      $("claimYearSelect").value = String(claimYear);
+      fillClaimMonthSelect(claimYear, teacherViewSessionGet("claim_month", selectedMonth));
+      resetSelectedWeek(true);
+      const savedWeekStart = teacherViewSessionGet("week_start", "");
+      if (savedWeekStart && weekIntersectsMonth(savedWeekStart, selectedYear, selectedMonth)) selectedWeekStartISO = savedWeekStart;
+      const savedDailyDate = teacherViewSessionGet("daily_date", "");
+      if (savedDailyDate) {
+        const dailyDate = parseISODate(savedDailyDate);
+        if (dailyDate.getFullYear() === selectedYear && dailyDate.getMonth() === Number($("monthSelect").value)) selectedDailyDateISO = savedDailyDate;
+      }
+    }
+
+    function persistTeacherViewSelection() {
+      teacherViewSessionSet("month", $("monthSelect").value);
+      teacherViewSessionSet("year", $("yearSelect").value);
+      if (selectedWeekStartISO) teacherViewSessionSet("week_start", selectedWeekStartISO);
+      if (selectedDailyDateISO) teacherViewSessionSet("daily_date", selectedDailyDateISO);
+    }
+
+    function persistTeacherClaimSelection() {
+      teacherViewSessionSet("claim_month", $("claimMonthSelect").value);
+      teacherViewSessionSet("claim_year", $("claimYearSelect").value);
+    }
+
+    function fillClaimMonthSelect(year, preferredMonth = null) {
+      const months = availableMonthsForYear(year);
+      $("claimMonthSelect").innerHTML = months.map(item => `<option value="${item.index}">${item.month}</option>`).join("");
+      const fallback = months[0]?.index ?? FIRST_VIEW_MONTH;
+      const safeMonth = months.some(item => item.index === Number(preferredMonth)) ? Number(preferredMonth) : fallback;
+      $("claimMonthSelect").value = String(safeMonth);
+    }
+
+    function mondayOf(date) {
+      const copy = new Date(date);
+      const day = (copy.getDay() + 6) % 7;
+      copy.setDate(copy.getDate() - day);
+      return copy;
+    }
+
+    function weekDates(startISO) {
+      return Array.from({ length: 7 }, (_, index) => parseISODate(dateOffsetISO(startISO, index)));
+    }
+
+    function weeksForMonth(year, month) {
+      const start = mondayOf(new Date(year, month, 1));
+      const end = mondayOf(new Date(year, month + 1, 0));
+      const weeks = [];
+      for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 7)) {
+        weeks.push(localISO(date));
+      }
+      return weeks;
+    }
+
+    function weekIntersectsMonth(startISO, year, month) {
+      const start = parseISODate(startISO);
+      const end = parseISODate(dateOffsetISO(startISO, 6));
+      const monthStart = new Date(year, month, 1);
+      const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
+      return start <= monthEnd && end >= monthStart;
+    }
+
+    function resetSelectedWeek(preferLiveWeek = false) {
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const liveWeek = localISO(mondayOf(new Date()));
+      selectedWeekStartISO = preferLiveWeek && weekIntersectsMonth(liveWeek, year, month)
+        ? liveWeek
+        : (weeksForMonth(year, month)[0] || liveWeek);
+    }
+
+    function selectedWeekIsLive() {
+      return selectedWeekStartISO === localISO(mondayOf(new Date()));
+    }
+
+    function ensureYearOption(year) {
+      if (![...$("yearSelect").options].some(option => Number(option.value) === year)) {
+        $("yearSelect").add(new Option(String(year), String(year)));
+      }
+    }
+
+    async function navigateWeek(offset) {
+      const candidate = dateOffsetISO(selectedWeekStartISO || localISO(mondayOf(new Date())), offset * 7);
+      const minimumDate = new Date(FIRST_VIEW_YEAR, FIRST_VIEW_MONTH, 1);
+      if (parseISODate(dateOffsetISO(candidate, 6)) < minimumDate) return;
+      const selectedMonth = Number($("monthSelect").value);
+      const selectedYear = Number($("yearSelect").value);
+      selectedWeekStartISO = candidate;
+      if (weekIntersectsMonth(candidate, selectedYear, selectedMonth)) {
+        persistTeacherViewSelection();
+        renderMonthCalendar();
+        return;
+      }
+      const reference = parseISODate(offset > 0 ? dateOffsetISO(candidate, 6) : candidate);
+      const targetYear = reference.getFullYear();
+      const targetMonth = reference.getMonth();
+      ensureYearOption(targetYear);
+      $("yearSelect").value = String(targetYear);
+      fillMonthSelect(targetYear, targetMonth);
+      $("monthSelect").value = String(targetMonth);
+      persistTeacherViewSelection();
+      await loadTimetable();
+    }
+
+    function selectedMonthRange() {
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const monthStart = mondayOf(new Date(year, month, 1));
+      const monthEndMonday = mondayOf(new Date(year, month + 1, 0));
+      const monthEnd = parseISODate(dateOffsetISO(localISO(monthEndMonday), 6));
+      const nextWeek = parseISODate(dateOffsetISO(localISO(new Date()), 7));
+      const toDate = new Date(Math.max(monthEnd.getTime(), nextWeek.getTime()));
+      return { from: localISO(monthStart), to: localISO(toDate), month, year };
+    }
+
+    function teacherCacheKey(year, month) {
+      const teacherId = params.get("teacherId") || params.get("teacher") || "";
+      return `${teacherId}|${year}|${String(month).padStart(2, "0")}`;
+    }
+
+    function cacheCurrentTimetable(range, data) {
+      if (!data) return;
+      monthTimetableCache.set(teacherCacheKey(range.year, range.month), {
+        data: typeof structuredClone === "function" ? structuredClone(data) : JSON.parse(JSON.stringify(data)),
+        version: Number(data.version || 0),
+        cachedAt: new Date().toISOString()
+      });
+      if (monthTimetableCache.size > 6) {
+        const oldestKey = monthTimetableCache.keys().next().value;
+        monthTimetableCache.delete(oldestKey);
+      }
+    }
+
+    function useCachedTimetable(range) {
+      const cached = monthTimetableCache.get(teacherCacheKey(range.year, range.month));
+      if (!cached?.data) return false;
+      timetableData = normalizeLoadedTimetable(typeof structuredClone === "function" ? structuredClone(cached.data) : JSON.parse(JSON.stringify(cached.data)));
+      lastLoadedVersion = Number(cached.version || timetableData.version || lastLoadedVersion || 0);
+      $("teacherChip").textContent = timetableData.teacher?.name || "Teacher";
+      setSyncChip(`Cache: ${MONTHS[range.month]} ${range.year}`);
+      setStatus(`Loaded ${MONTHS[range.month]} ${range.year} from local month cache.`);
+      renderAll();
+      $("teacherDataContent").classList.remove("hide");
+      return true;
+    }
+
+    async function loadTimetable({ silent = false, force = false } = {}) {
+      const teacherId = params.get("teacherId") || params.get("teacher") || "";
+      const token = params.get("token") || "";
+      if (!teacherId || !token) {
+        setStatus("Teacher timetable link is missing. Please ask admin to generate a teacher timetable view link.", "error");
+        $("teacherDataContent").classList.add("hide");
+        throw new Error("Teacher link token is invalid or not synced yet.");
+      }
+      const range = selectedMonthRange();
+      if (!force && useCachedTimetable(range)) return;
+      const url = new URL(`${API_BASE}/api/teacher-view`);
+      url.searchParams.set("key", STATE_KEY);
+      url.searchParams.set("teacherId", teacherId);
+      url.searchParams.set("token", token);
+      url.searchParams.set("from", range.from);
+      url.searchParams.set("to", range.to);
+      url.searchParams.set("month", String(range.month));
+      url.searchParams.set("year", String(range.year));
+      url.searchParams.set("_", String(Date.now()));
+      if (!silent) setStatus("Loading latest timetable...");
+      let data;
+      try {
+        data = await fetchTeacherApi(url.toString(), { teacherId, from: range.from, to: range.to });
+      } catch (error) {
+        throw new Error(teacherApiErrorMessage(error));
+      }
+      timetableData = normalizeLoadedTimetable(data);
+      cacheCurrentTimetable(range, timetableData);
+      lastLoadedVersion = Number(data.version || 0);
+      $("teacherChip").textContent = data.teacher.name || "Teacher";
+      lastAutoSyncAt = new Date();
+      setSyncChip(`Auto-sync: ${clockLabel(lastAutoSyncAt)}`);
+      setStatus(`${silent ? "Auto-synced" : "Loaded latest timetable"} at ${clockLabel(lastAutoSyncAt)}.`);
+      renderAll();
+      $("teacherDataContent").classList.remove("hide");
+    }
+
+    async function loadTeacherVersion() {
+      const teacherId = params.get("teacherId") || params.get("teacher") || "";
+      const token = params.get("token") || "";
+      if (!teacherId || !token) throw new Error("Teacher timetable link is missing.");
+      const url = new URL(`${API_BASE}/api/teacher-version`);
+      url.searchParams.set("key", STATE_KEY);
+      url.searchParams.set("teacherId", teacherId);
+      url.searchParams.set("token", token);
+      url.searchParams.set("_", String(Date.now()));
+      try {
+        return await fetchTeacherApi(url.toString(), { teacherId });
+      } catch (error) {
+        throw new Error(teacherApiErrorMessage(error));
+      }
+    }
+
+	    async function autoSyncTimetable() {
+      if (autoSyncInProgress) return;
+      if (studentSaveTimer) {
+        setSyncChip("Auto-sync: paused while editing");
+        return;
+      }
+      autoSyncInProgress = true;
+      setSyncChip("Auto-sync: checking...");
+      try {
+	        const latest = await loadTeacherVersion();
+	        if (Number(latest.version || 0) > lastLoadedVersion) {
+	          await loadTimetable({ silent: true, force: true });
+        } else {
+          setSyncChip(`Auto-sync: ${clockLabel(new Date())}`);
+        }
+      } catch (error) {
+        setSyncChip("Auto-sync failed");
+        showTimetableLoadFailure(error, true);
+      } finally {
+        autoSyncInProgress = false;
+      }
+    }
+
+    function startAutoSync() {
+      clearInterval(autoSyncTimer);
+      setSyncChip("Auto-sync: every 15 sec");
+      autoSyncTimer = setInterval(autoSyncTimetable, AUTO_SYNC_MS);
+    }
+
+    function scheduleCells() {
+      return (timetableData?.cells || [])
+        .filter(cell => cell.time)
+        .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`));
+    }
+
+    function findCell(dateISO, time) {
+      return scheduleCells().find(cell => cell.date === dateISO && cell.time === time);
+    }
+
+    function weekTimes(dates) {
+      const values = new Set();
+      for (let total = 8 * 60; total <= 21 * 60 + 30; total += 30) {
+        values.add(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`);
+      }
+      dates.forEach(date => {
+        const dateISO = localISO(date);
+        const cells = scheduleCells().filter(cell => cell.date === dateISO);
+        cells.forEach(cell => values.add(cell.time));
+      });
+      return [...values].sort((a, b) => minutes(a) - minutes(b));
+    }
+
+    function cellHtml(date, time, options = {}) {
+      const dateISO = localISO(date);
+      const outsideClass = options.month != null && date.getMonth() !== options.month ? " outside-month" : "";
+      const cell = findCell(dateISO, time);
+      if (cell) {
+        if (cell.kind === "off" || cell.status === "off" || cell.unavailable) {
+          return `<td class="cell-off${outsideClass}">OFF</td>`;
+        }
+        if (cell.kind === "open") {
+          return `<td class="cell-open${outsideClass}"><span class="cell-small">${escapeHtml(cell.subject || "Open")}</span></td>`;
+        }
+        const displayStatus = resolvedClassStatus(cell);
+        const statusBadge = displayStatus === "completed"
+          ? `<span class="completed-badge">Completed</span>`
+          : `<span class="status-badge ${statusClass(displayStatus)}">${escapeHtml(statusLabel(displayStatus))}</span>`;
+        const details = `${cell.type || "class"}${cell.subject ? ` | ${cell.subject}` : ""}`;
+        const cellClass = cell.kind === "fixed" ? "cell-fixed" : "cell-booking";
+        return `<td class="${cellClass} ${typeClass(cell.type)} ${statusClass(displayStatus)}${outsideClass}">
+          ${statusBadge}
+          <span class="cell-student-name">${escapeHtml(cell.studentName || "Class")}</span>
+          <span class="cell-class-details">${escapeHtml(details)}</span>
+        </td>`;
+      }
+      return `<td class="cell-off${outsideClass}">OFF</td>`;
+    }
+
+    function weekTableHtml(dates, options = {}) {
+      const times = weekTimes(dates);
+      const header = `<tr><th class="time-col">Time</th>${dates.map(date => `<th>${DAYS[(date.getDay() + 6) % 7].slice(0, 3)}<br><span>${date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span></th>`).join("")}</tr>`;
+      const rows = times.map(time => `<tr><td class="time-col">${timeLabel(time)}</td>${dates.map(date => cellHtml(date, time, options)).join("")}</tr>`).join("");
+      return `<table class="teacher-timetable"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function renderMonthCalendar() {
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      if (!selectedWeekStartISO || !weekIntersectsMonth(selectedWeekStartISO, year, month)) resetSelectedWeek(true);
+      const dates = weekDates(selectedWeekStartISO);
+      const weeks = weeksForMonth(year, month);
+      const weekIndex = weeks.indexOf(selectedWeekStartISO);
+      $("selectedWeekLabel").textContent = `${dateLabel(localISO(dates[0]))} - ${dateLabel(localISO(dates[6]))}`;
+      $("selectedWeekContext").textContent = selectedWeekIsLive() ? "Live week" : (weekIndex >= 0 ? `Week ${weekIndex + 1} of ${MONTHS[month]} ${year}` : `${MONTHS[month]} ${year}`);
+      const minimumDate = new Date(FIRST_VIEW_YEAR, FIRST_VIEW_MONTH, 1);
+      $("previousWeekBtn").disabled = parseISODate(dateOffsetISO(selectedWeekStartISO, -1)) < minimumDate;
+      $("monthCalendar").innerHTML = `<div class="month-week"><div class="timetable-wrap">${weekTableHtml(dates, { month })}</div></div>`;
+    }
+
+    function classEntries(fromISO, toISO) {
+      const cells = scheduleCells().filter(cell => cell.date >= fromISO && cell.date <= toISO && !["open", "reserved", "off"].includes(cell.kind) && cell.status !== "off" && !cell.unavailable);
+      return cells.map(cell => ({ kind: "cell", date: cell.date, time: cell.time, cell }))
+        .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+    }
+
+    function todayISO() {
+      return localISO(new Date());
+    }
+
+    function dateRelationLabel(dateISO) {
+      const today = todayISO();
+      if (dateISO === today) return "Today";
+      if (dateISO === dateOffsetISO(today, 1)) return "Tomorrow";
+      if (dateISO === dateOffsetISO(today, -1)) return "Yesterday";
+      const date = parseISODate(dateISO);
+      return date.toLocaleDateString("en-GB", { weekday: "long" });
+    }
+
+    function dailyHeaderLabel(dateISO) {
+      const date = parseISODate(dateISO);
+      const relation = dateRelationLabel(dateISO);
+      const dateText = date.toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "short", year: "numeric" });
+      if (["Today", "Tomorrow", "Yesterday"].includes(relation)) {
+        return `${relation} · ${date.toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "short" })}`;
+      }
+      return dateText;
+    }
+
+    function ensureDailyDateForSelectedMonth(preferExisting = true) {
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const current = selectedDailyDateISO ? parseISODate(selectedDailyDateISO) : null;
+      if (preferExisting && current && current.getMonth() === month && current.getFullYear() === year) return;
+      const today = parseISODate(todayISO());
+      selectedDailyDateISO = today.getMonth() === month && today.getFullYear() === year
+        ? todayISO()
+        : localISO(new Date(year, month, 1));
+      const minimum = new Date(FIRST_VIEW_YEAR, FIRST_VIEW_MONTH, 1);
+      if (parseISODate(selectedDailyDateISO) < minimum) selectedDailyDateISO = localISO(minimum);
+    }
+
+    function entriesForDay(dateISO) {
+      return classEntries(dateISO, dateISO).sort((a, b) => minutes(a.time) - minutes(b.time));
+    }
+
+    function classCardHtml(entry) {
+      const meta = entryMeta(entry);
+      const passed = meta.status === "completed";
+      const notShow = meta.status === "student_not_show";
+      const statusBadge = passed
+        ? `<span class="completed-badge">Completed</span>`
+        : `<span class="status-badge ${statusClass(meta.status)}">${escapeHtml(notShow ? "Student Not Show" : statusLabel(meta.status))}</span>`;
+      const details = `${meta.type || "class"}${meta.subject ? ` | ${meta.subject}` : ""}`;
+      return `<div class="class-card ${typeClass(meta.type)} ${statusClass(meta.status)}${passed ? " is-passed" : ""}${notShow ? " is-not-show" : ""}">
+        ${statusBadge}
+        <strong>${escapeHtml(meta.studentName)}</strong>
+        <div class="subtle">${escapeHtml(details)}</div>
+        <div class="class-time">${timeLabel(entry.time)}</div>
+        <div class="subtle">${dateLabel(entry.date)}</div>
+        ${meta.remark ? `<div class="subtle" style="margin-top:8px;">${escapeHtml(meta.remark)}</div>` : ""}
+      </div>`;
+    }
+
+    function renderDailyWeekStrip() {
+      const selected = parseISODate(selectedDailyDateISO);
+      const start = mondayOf(selected);
+      const dates = weekDates(localISO(start));
+      $("dailyWeekStrip").innerHTML = dates.map(date => {
+        const dateISO = localISO(date);
+        const count = entriesForDay(dateISO).length;
+        const active = dateISO === selectedDailyDateISO;
+        return `<button class="daily-day-button${count ? " has-classes" : ""}${active ? " active" : ""}" data-daily-date="${dateISO}" aria-label="${escapeHtml(dateLabel(dateISO))}, ${count} class${count === 1 ? "" : "es"}">
+          <span>${escapeHtml(DAYS[(date.getDay() + 6) % 7].slice(0, 3))}</span>
+          <strong>${date.getDate()}</strong>
+          <i class="dot" aria-hidden="true"></i>
+        </button>`;
+      }).join("");
+    }
+
+    function renderDailyNavigator() {
+      if (!timetableData) return;
+      ensureDailyDateForSelectedMonth(true);
+      const entries = entriesForDay(selectedDailyDateISO);
+      const relation = dateRelationLabel(selectedDailyDateISO);
+      $("dailyDateLabel").textContent = dailyHeaderLabel(selectedDailyDateISO);
+      $("dailyDateContext").textContent = dateLabel(selectedDailyDateISO);
+      $("dailyClassesTitle").textContent = `${relation}'s Classes (${entries.length})`;
+      $("dailyCacheStatus").textContent = `Using loaded ${MONTHS[parseISODate(selectedDailyDateISO).getMonth()]} timetable`;
+      renderDailyWeekStrip();
+      const list = $("upcomingList");
+      list.className = `daily-list cards slide-${dailySlideDirection || "still"}`;
+      list.innerHTML = entries.length
+        ? entries.map(classCardHtml).join("")
+        : `<div class="daily-empty"><div style="font-size:30px;">🌙</div><strong>No classes scheduled.</strong><span>Enjoy your day.</span></div>`;
+      const todayEntries = entriesForDay(todayISO()).filter(entry => !CANCELLED.includes(entryMeta(entry).status));
+      const remaining = todayEntries.filter(entry => entryMeta(entry).status !== "completed");
+      $("metricUpcoming").textContent = remaining.length;
+      window.setTimeout(() => {
+        if (list) list.classList.remove("slide-next", "slide-prev", "slide-still");
+      }, 260);
+    }
+
+    async function navigateDaily(offset) {
+      const previousScroll = { x: window.scrollX, y: window.scrollY };
+      const targetISO = dateOffsetISO(selectedDailyDateISO || todayISO(), offset);
+      const minimumDate = new Date(FIRST_VIEW_YEAR, FIRST_VIEW_MONTH, 1);
+      if (parseISODate(targetISO) < minimumDate) return;
+      dailySlideDirection = offset > 0 ? "next" : "prev";
+      const targetDate = parseISODate(targetISO);
+      const currentMonth = Number($("monthSelect").value);
+      const currentYear = Number($("yearSelect").value);
+      selectedDailyDateISO = targetISO;
+      if (targetDate.getMonth() !== currentMonth || targetDate.getFullYear() !== currentYear) {
+        ensureYearOption(targetDate.getFullYear());
+        $("yearSelect").value = String(targetDate.getFullYear());
+        fillMonthSelect(targetDate.getFullYear(), targetDate.getMonth());
+        $("monthSelect").value = String(targetDate.getMonth());
+        persistTeacherViewSelection();
+        resetSelectedWeek(true);
+        await loadTimetable();
+      } else {
+        persistTeacherViewSelection();
+        renderDailyNavigator();
+      }
+      window.scrollTo(previousScroll.x, previousScroll.y);
+    }
+
+    async function selectDailyDate(dateISO) {
+      const previous = selectedDailyDateISO || todayISO();
+      const offset = parseISODate(dateISO) >= parseISODate(previous) ? 1 : -1;
+      selectedDailyDateISO = dateISO;
+      dailySlideDirection = offset > 0 ? "next" : "prev";
+      const target = parseISODate(dateISO);
+      if (target.getMonth() !== Number($("monthSelect").value) || target.getFullYear() !== Number($("yearSelect").value)) {
+        ensureYearOption(target.getFullYear());
+        $("yearSelect").value = String(target.getFullYear());
+        fillMonthSelect(target.getFullYear(), target.getMonth());
+        $("monthSelect").value = String(target.getMonth());
+        persistTeacherViewSelection();
+        await loadTimetable();
+      } else {
+        persistTeacherViewSelection();
+        renderDailyNavigator();
+      }
+    }
+
+    function entryMeta(entry) {
+      const teacherRate = Number(timetableData?.teacher?.rate || 0);
+      const defaultPay = (value) => Number(value || 0) || teacherRate;
+      if (entry.kind === "cell") {
+        const status = resolvedClassStatus({ ...entry.cell, date: entry.date, time: entry.time });
+        return {
+          studentName: entry.cell.studentName || "Class",
+          subject: entry.cell.subject || "",
+          type: entry.cell.type || "class",
+          status,
+          remark: entry.cell.remark || "",
+          estimatedPay: defaultPay(entry.cell.estimatedPay)
+        };
+      }
+      if (entry.kind === "booking") {
+        const status = statusForDisplay(entry.booking);
+        return {
+          studentName: entry.booking.studentName || "Class",
+          subject: entry.booking.subject || "",
+          type: entry.booking.type || "class",
+          status,
+          remark: entry.booking.remark || "",
+          estimatedPay: defaultPay(entry.booking.estimatedPay)
+        };
+      }
+      return {
+        studentName: entry.slot.studentName || "Fixed Regular",
+        subject: entry.slot.subject || "",
+        type: "regular class",
+        status: resolvedClassStatus({ ...entry.slot, date: entry.date, time: entry.time, status: "booked" }),
+        remark: "",
+        estimatedPay: defaultPay(entry.slot.estimatedPay)
+      };
+    }
+
+    function incomePayForEntry(entry) {
+      const meta = entryMeta(entry);
+      const type = String(meta.type || "").toLowerCase();
+      if (CANCELLED.includes(meta.status) || type === "cancelled") return 0;
+      if (meta.status === "student_not_show") return Number(meta.estimatedPay || 5);
+      if (type === "practical class") return 0;
+      if (meta.status === "completed") return Number(meta.estimatedPay || 0);
+      return 0;
+    }
+
+    function isPaidCompletedEntry(entry) {
+      const meta = entryMeta(entry);
+      const type = String(meta.type || "").toLowerCase();
+      return meta.status === "completed" && !CANCELLED.includes(meta.status) && type !== "practical class" && type !== "cancelled";
+    }
+
+    function isNotShowEntry(entry) {
+      return entryMeta(entry).status === "student_not_show";
+    }
+
+    function isCancelledEntry(entry) {
+      return CANCELLED.includes(entryMeta(entry).status);
+    }
+
+    function apiIncomeSummaryFor(month, year) {
+      const summary = timetableData?.incomeSummary;
+      if (!summary) return null;
+      if (Number(summary.month) !== Number(month) || Number(summary.year) !== Number(year)) return null;
+      return summary;
+    }
+
+    function monthlyTeachingSummary(month, year) {
+      const from = localISO(new Date(year, month, 1));
+      const to = localISO(new Date(year, month + 1, 0));
+      const entries = timetableData ? classEntries(from, to) : [];
+      const completed = entries.filter(isPaidCompletedEntry);
+      const notShows = entries.filter(isNotShowEntry);
+      const cancelled = entries.filter(isCancelledEntry);
+      const teacherLeaveCount = entries.filter(entry => entryMeta(entry).status === "teacher_leave").length;
+      const lessonPay = completed.reduce((sum, entry) => sum + Number(entryMeta(entry).estimatedPay || 0), 0);
+      const notShowPay = notShows.reduce((sum, entry) => sum + Number(entryMeta(entry).estimatedPay || 5), 0);
+      const notShowRate = notShows.length ? notShowPay / notShows.length : 5;
+      const apiSummary = apiIncomeSummaryFor(month, year);
+      return {
+        entries,
+        completed,
+        notShows,
+        cancelled,
+        completedCount: apiSummary ? Number(apiSummary.completedLessons || 0) : completed.length,
+        notShowCount: apiSummary ? Number(apiSummary.noShowCount ?? notShows.length) : notShows.length,
+        notShowRate,
+        cancelledCount: apiSummary ? Number(apiSummary.cancelledCount ?? cancelled.length) : cancelled.length,
+        teacherLeaveCount,
+        lessonPay: apiSummary ? Number(apiSummary.completedIncome || 0) : lessonPay,
+        notShowPay: apiSummary ? Number(apiSummary.noShowAllowance || 0) : notShowPay,
+        incomeTotal: apiSummary ? Number(apiSummary.totalIncome || 0) : lessonPay + notShowPay,
+        incomeMode: apiSummary?.incomeMode || timetableData?.teacher?.incomeMode || "fixed_rate",
+        teacherCategory: apiSummary?.teacherCategory || timetableData?.teacher?.payoutMethod || "Freelance Tutor",
+        approvedClassRate: Number(apiSummary?.approvedClassRate ?? timetableData?.teacher?.rate ?? 0),
+        profitSharePercentage: Number(apiSummary?.profitSharePercentage ?? timetableData?.teacher?.profitShare ?? 0),
+        studentIncomeRows: apiSummary?.studentIncomeRows || [],
+        packageWarnings: apiSummary?.packageWarnings || []
+      };
+    }
+
+    function selectedClaimMonthKey() {
+      return `${$("claimYearSelect").value}-${String(Number($("claimMonthSelect").value) + 1).padStart(2, "0")}`;
+    }
+
+    function claimAutomaticSummary() {
+      const month = Number($("claimMonthSelect").value);
+      const year = Number($("claimYearSelect").value);
+      const summary = monthlyTeachingSummary(month, year);
+      let attendancePay = 0;
+      if (!summary.teacherLeaveCount) {
+        if (summary.completedCount > 130) attendancePay = 100;
+        else if (summary.completedCount > 80) attendancePay = 80;
+        else if (summary.completedCount > 50) attendancePay = 50;
+      }
+      return {
+        completedCount: summary.completedCount,
+        notShowCount: summary.notShowCount,
+        teacherLeaveCount: summary.teacherLeaveCount,
+        lessonPay: summary.lessonPay,
+        notShowPay: summary.notShowPay,
+        attendancePay,
+        incomeMode: summary.incomeMode,
+        profitSharePercentage: summary.profitSharePercentage,
+        approvedClassRate: summary.approvedClassRate
+      };
+    }
+
+    function rewardValue(prefix, amount, quantityEnabled = false) {
+      const claimed = $(`claim${prefix}`).checked;
+      const quantity = quantityEnabled ? Math.max(1, Number($(`claim${prefix}Qty`).value) || 1) : 1;
+      return {
+        claimed,
+        quantity,
+        remark: $(`claim${prefix}Remark`).value.trim(),
+        amount: claimed ? amount * quantity : 0
+      };
+    }
+
+    function currentClaimForm() {
+      return {
+        email: $("claimEmail").value.trim(),
+        accountName: $("claimAccountName").value.trim(),
+        bankName: $("claimBankName").value.trim(),
+        accountNumber: $("claimAccountNumber").value.trim(),
+        birthday: rewardValue("Birthday", 10),
+        bestTeacher: rewardValue("BestTeacher", 25),
+        googleReview: rewardValue("GoogleReview", 20, true),
+        trialEnrollment: rewardValue("TrialEnrollment", 10, true)
+      };
+    }
+
+    function setRewardForm(prefix, reward, quantityEnabled = false) {
+      $(`claim${prefix}`).checked = Boolean(reward?.claimed);
+      if (quantityEnabled) $(`claim${prefix}Qty`).value = String(Math.max(1, Number(reward?.quantity) || 1));
+      $(`claim${prefix}Remark`).value = reward?.remark || "";
+      toggleRewardFields(prefix, quantityEnabled);
+    }
+
+    function fillClaimForm(claim) {
+      const value = claim || {};
+      $("claimEmail").value = value.email || timetableData?.teacher?.email || "";
+      $("claimAccountName").value = value.accountName || timetableData?.teacher?.name || "";
+      $("claimBankName").value = value.bankName || "";
+      $("claimAccountNumber").value = value.accountNumber || "";
+      setRewardForm("Birthday", value.birthday);
+      setRewardForm("BestTeacher", value.bestTeacher);
+      setRewardForm("GoogleReview", value.googleReview, true);
+      setRewardForm("TrialEnrollment", value.trialEnrollment, true);
+      renderIncentiveClaim();
+    }
+
+    function toggleRewardFields(prefix, quantityEnabled = false) {
+      const enabled = $(`claim${prefix}`).checked;
+      const fields = $(`claim${prefix}Fields`);
+      fields.setAttribute("aria-disabled", enabled ? "false" : "true");
+      $(`claim${prefix}Remark`).disabled = !enabled;
+      if (quantityEnabled) $(`claim${prefix}Qty`).disabled = !enabled;
+    }
+
+    function claimRows() {
+      const automatic = claimAutomaticSummary();
+      const claim = currentClaimForm();
+      const rate = Number(timetableData?.teacher?.rate || 0);
+      const lessonDescription = automatic.incomeMode === "profit_share"
+        ? `${automatic.completedCount} completed lessons by package share (${Number(automatic.profitSharePercentage || 0).toFixed(2)}%)`
+        : (rate > 0 ? `${automatic.completedCount} completed lessons x RM${rate.toFixed(2)}` : `${automatic.completedCount} completed lessons`);
+      const rows = [
+        {
+          project: "Online class incentive",
+          description: lessonDescription,
+          amount: automatic.lessonPay,
+          automatic: true
+        },
+        {
+          project: "Online class incentive (waiting without inform)",
+          description: `${automatic.notShowCount} lesson${automatic.notShowCount === 1 ? "" : "s"} x ${money(automatic.notShowRate || 5)}`,
+          amount: automatic.notShowPay,
+          automatic: true
+        },
+        {
+          project: "Full attendance reward",
+          description: automatic.teacherLeaveCount
+            ? `${automatic.teacherLeaveCount} teacher leave record${automatic.teacherLeaveCount === 1 ? "" : "s"}; not eligible`
+            : `${automatic.completedCount} completed lessons; no teacher leave`,
+          amount: automatic.attendancePay,
+          automatic: true
+        }
+      ];
+      if (claim.birthday.claimed) rows.push({ project: "Birthday reward", description: claim.birthday.remark, amount: 10 });
+      if (claim.bestTeacher.claimed) rows.push({ project: "Monthly best teacher award", description: claim.bestTeacher.remark, amount: 25 });
+      if (claim.googleReview.claimed) rows.push({ project: "Google review", description: `${claim.googleReview.quantity} review${claim.googleReview.quantity === 1 ? "" : "s"} x RM20 | ${claim.googleReview.remark}`, amount: claim.googleReview.amount });
+      if (claim.trialEnrollment.claimed) rows.push({ project: "Trial to enrollment", description: `${claim.trialEnrollment.quantity} enrollment${claim.trialEnrollment.quantity === 1 ? "" : "s"} x RM10 | ${claim.trialEnrollment.remark}`, amount: claim.trialEnrollment.amount });
+      return rows;
+    }
+
+    function renderIncentiveClaim() {
+      if (!$("claimAutomaticSummary")) return;
+      const automatic = claimAutomaticSummary();
+      $("claimAutomaticSummary").innerHTML = tableHtml(
+        ["Item", "Calculation", "Amount"],
+        [
+          ["Completed lessons", `${automatic.completedCount} lessons`, money(automatic.lessonPay)],
+          ["Student not show", `${automatic.notShowCount} x ${money(automatic.notShowRate || 5)}`, money(automatic.notShowPay)],
+          ["Full attendance", automatic.teacherLeaveCount ? `Not eligible (${automatic.teacherLeaveCount} teacher leave)` : `${automatic.completedCount} completed lessons`, money(automatic.attendancePay)]
+        ]
+      );
+      const rows = claimRows();
+      const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      $("claimSummary").innerHTML = `<table class="simple-table claim-summary">
+        <thead><tr><th>No.</th><th>Project</th><th>Description</th><th>Amount (RM)</th></tr></thead>
+        <tbody>${rows.map((row, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(row.project)}</td><td>${escapeHtml(row.description)}</td><td>${escapeHtml(money(row.amount))}</td></tr>`).join("")}</tbody>
+        <tfoot><tr><td colspan="3">Total</td><td>${escapeHtml(money(total))}</td></tr></tfoot>
+      </table>`;
+    }
+
+    function validateClaimForm() {
+      const claim = currentClaimForm();
+      const required = [
+        ["Birthday reward", claim.birthday],
+        ["Monthly best teacher award", claim.bestTeacher],
+        ["Google review", claim.googleReview],
+        ["Trial to enrollment", claim.trialEnrollment]
+      ];
+      const missing = required.find(([, reward]) => reward.claimed && !reward.remark);
+      if (missing) throw new Error(`${missing[0]} requires a remark or reference.`);
+      return claim;
+    }
+
+    function claimApiUrl() {
+      const url = new URL(`${API_BASE}/api/teacher-incentive-claim`);
+      url.searchParams.set("key", STATE_KEY);
+      url.searchParams.set("teacherId", params.get("teacherId") || params.get("teacher") || "");
+      url.searchParams.set("token", params.get("token") || "");
+      url.searchParams.set("monthKey", selectedClaimMonthKey());
+      return url;
+    }
+
+    async function loadIncentiveClaim() {
+      if (incentiveClaimLoading || !timetableData) return;
+      incentiveClaimLoading = true;
+      $("claimLoadStatus").textContent = "Loading saved claim...";
+      try {
+        const response = await fetch(claimApiUrl().toString(), { method: "GET", cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.error || `Claim load failed with HTTP ${response.status}`);
+        incentiveClaimLoadedKey = selectedClaimMonthKey();
+        fillClaimForm(data.claim);
+        $("claimLoadStatus").textContent = data.updatedAt
+          ? `Saved claim loaded. Last saved ${new Date(data.updatedAt).toLocaleString()}.`
+          : "No saved claim for this month yet. You can prepare a new claim.";
+      } catch (error) {
+        $("claimLoadStatus").textContent = `Could not load claim: ${error.message}`;
+      } finally {
+        incentiveClaimLoading = false;
+      }
+    }
+
+    async function loadClaimMonth() {
+      const month = Number($("claimMonthSelect").value);
+      const year = Number($("claimYearSelect").value);
+      $("yearSelect").value = String(year);
+      fillMonthSelect(year, month);
+      $("monthSelect").value = String(month);
+      persistTeacherViewSelection();
+      persistTeacherClaimSelection();
+      $("claimLoadStatus").textContent = "Loading timetable and saved claim for this month...";
+      await loadTimetable({ silent: true });
+      await loadIncentiveClaim();
+    }
+
+    async function saveIncentiveClaim() {
+      const claim = validateClaimForm();
+      $("saveClaimBtn").disabled = true;
+      $("claimLoadStatus").textContent = "Saving claim to Class One database...";
+      try {
+        const response = await fetch(`${API_BASE}/api/teacher-incentive-claim`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key: STATE_KEY,
+            teacherId: params.get("teacherId") || params.get("teacher") || "",
+            token: params.get("token") || "",
+            monthKey: selectedClaimMonthKey(),
+            claim
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.error || `Claim save failed with HTTP ${response.status}`);
+        incentiveClaimLoadedKey = selectedClaimMonthKey();
+        $("claimLoadStatus").textContent = `Claim saved at ${new Date(data.updatedAt).toLocaleString()}.`;
+      } catch (error) {
+        $("claimLoadStatus").textContent = `Claim was not saved: ${error.message}`;
+      } finally {
+        $("saveClaimBtn").disabled = false;
+      }
+    }
+
+    function exportClaimPdf() {
+      let claim;
+      try {
+        claim = validateClaimForm();
+      } catch (error) {
+        return alert(error.message);
+      }
+      const rows = claimRows();
+      const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      const month = Number($("claimMonthSelect").value);
+      const year = Number($("claimYearSelect").value);
+      const teacherName = timetableData?.teacher?.name || "Teacher";
+      const logoUrl = new URL("classone-logo.jpeg", window.location.href).href;
+      const tableRows = rows.map((row, index) => `<tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(row.project)}</td>
+        <td>${escapeHtml(row.description)}${row.automatic ? "" : "<br><small>Evidence attached separately</small>"}</td>
+        <td>${escapeHtml(money(row.amount))}</td>
+      </tr>`).join("");
+      const popup = window.open("", "_blank");
+      if (!popup) return alert("Please allow popups to export PDF.");
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(teacherName)} ${MONTHS[month]} ${year} Incentive Claim</title>
+        <style>
+          *{box-sizing:border-box} body{font-family:Arial,sans-serif;color:#111;padding:28px;max-width:980px;margin:auto} .header{display:grid;grid-template-columns:230px 1fr;gap:22px;align-items:start}.header img{width:210px;max-height:125px;object-fit:contain}.company{font-size:18px;line-height:1.45}.company strong{font-size:22px}.title{text-align:center;font-size:30px;margin:34px 0 24px}.details{display:grid;grid-template-columns:1fr 1fr;gap:8px 36px;margin-bottom:26px}.details div{display:grid;grid-template-columns:105px 1fr;gap:8px}table{width:100%;border-collapse:collapse}th,td{border:1.5px solid #111;padding:9px;text-align:left;vertical-align:top}th{text-align:center;background:#fff}.number{width:55px}.amount{width:140px;text-align:right}tfoot td{font-weight:700;font-size:17px}small{color:#555}.print{float:right;padding:9px 14px;margin-bottom:12px}@media print{body{padding:0}.print{display:none}}
+        </style></head><body>
+        <button class="print" onclick="window.print()">Print / Save PDF</button>
+        <div class="header"><img src="${logoUrl}" alt="Class One"><div class="company"><strong>CLASSONE ELEARNING EDUCATION SDN. BHD.</strong><br>36D, Jalan Radin Anum,<br>Bandar Baru Seri Petaling,<br>57000, Wilayah Persekutuan, KL</div></div>
+        <h1 class="title">Incentive Claim</h1>
+        <div class="details">
+          <div><strong>Department:</strong><span>Class.One</span></div><div><strong>Date:</strong><span>${escapeHtml(new Date().toLocaleDateString("en-GB"))}</span></div>
+          <div><strong>To:</strong><span>${escapeHtml(teacherName)}</span></div><div><strong>Claim Month:</strong><span>${escapeHtml(`${MONTHS[month]} ${year}`)}</span></div>
+          <div><strong>Email:</strong><span>${escapeHtml(claim.email || "-")}</span></div><div><strong>Bank:</strong><span>${escapeHtml(claim.bankName || "-")}</span></div>
+          <div><strong>Account Name:</strong><span>${escapeHtml(claim.accountName || "-")}</span></div><div><strong>Acc No:</strong><span>${escapeHtml(claim.accountNumber || "-")}</span></div>
+        </div>
+        <table><thead><tr><th class="number">No.</th><th>Project</th><th>Description</th><th class="amount">Amount (RM)</th></tr></thead><tbody>${tableRows}</tbody><tfoot><tr><td colspan="3" style="text-align:right">Total:</td><td class="amount">${escapeHtml(money(total))}</td></tr></tfoot></table>
+      </body></html>`);
+      popup.document.close();
+      popup.focus();
+      setTimeout(() => popup.print(), 350);
+    }
+
+    function tableHtml(headers, rows) {
+      return `<table class="simple-table"><thead><tr>${headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    }
+
+    function clampPage(page, total) {
+      return Math.min(Math.max(1, page), Math.max(1, Math.ceil(total / LIST_PAGE_SIZE)));
+    }
+
+    function pageSlice(items, page) {
+      const safePage = clampPage(page, items.length);
+      const start = (safePage - 1) * LIST_PAGE_SIZE;
+      return { page: safePage, start, items: items.slice(start, start + LIST_PAGE_SIZE), pages: Math.max(1, Math.ceil(items.length / LIST_PAGE_SIZE)) };
+    }
+
+    function pagerHtml(key, page, total) {
+      if (total <= LIST_PAGE_SIZE) return "";
+      const pages = Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+      const start = total ? (page - 1) * LIST_PAGE_SIZE + 1 : 0;
+      const end = Math.min(total, page * LIST_PAGE_SIZE);
+      return `<div class="row spread" style="margin-top:10px;"><span class="subtle">Showing ${start}-${end} of ${total} | Page ${page} of ${pages}</span><div class="row"><button class="btn ghost" data-page="${key}|prev" ${page <= 1 ? "disabled" : ""}>&lt;</button><button class="btn ghost" data-page="${key}|next" ${page >= pages ? "disabled" : ""}>&gt;</button></div></div>`;
+    }
+
+    function scrollToListStart(id) {
+      const target = $(id);
+      if (!target) return;
+      const scroller = target.matches(".timetable-wrap")
+        ? target
+        : target.querySelector(".timetable-wrap");
+      const node = scroller || target;
+      if (typeof node.scrollTo === "function") node.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      else {
+        node.scrollTop = 0;
+        node.scrollLeft = 0;
+      }
+    }
+
+    function renderTeacherStudents() {
+      const students = timetableData?.students || [];
+      teacherStudentPage = clampPage(teacherStudentPage, students.length);
+      const studentPageData = pageSlice(students, teacherStudentPage);
+      teacherStudentPage = studentPageData.page;
+      $("studentListTable").innerHTML = students.length ? `
+        <table class="simple-table student-table">
+          <thead><tr><th>No.</th><th>Student Name</th><th>Current Level</th><th>Remarks</th><th>Last Updated</th></tr></thead>
+          <tbody>
+            ${studentPageData.items.map((student, index) => `
+              <tr>
+                <td>${studentPageData.start + index + 1}</td>
+                <td><strong>${escapeHtml(student.studentName || "")}</strong>${student.subjects?.length ? `<div class="subtle">${student.subjects.map(escapeHtml).join(", ")}</div>` : ""}</td>
+                <td><input data-student-note="${escapeHtml(student.id)}" data-field="currentLevel" value="${escapeHtml(student.currentLevel || "")}" placeholder="Level"></td>
+                <td><textarea data-student-note="${escapeHtml(student.id)}" data-field="remark" placeholder="Remarks">${escapeHtml(student.remark || "")}</textarea></td>
+                <td class="subtle">${escapeHtml(student.lastUpdatedAt ? dateLabel(String(student.lastUpdatedAt).slice(0, 10)) : "-")}<br>${escapeHtml(student.lastUpdatedBy || "")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+        ${pagerHtml("teacherStudents", teacherStudentPage, students.length)}
+      ` : `<div class="subtle" style="padding:12px;">No active students assigned to this teacher yet.</div>`;
+    }
+
+    function updateLocalStudentNote(id, field, value) {
+      const student = (timetableData?.students || []).find(item => item.id === id);
+      if (!student || !["currentLevel", "remark"].includes(field)) return;
+      student[field] = value;
+      student.lastUpdatedAt = new Date().toISOString();
+      student.lastUpdatedBy = timetableData?.teacher?.name || "Teacher";
+    }
+
+    async function saveTeacherStudents() {
+      if (!timetableData?.teacher?.id) return;
+      $("studentSaveStatus").textContent = "Saving...";
+      const token = params.get("token") || "";
+      const response = await fetch(`${API_BASE}/api/teacher-students`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: STATE_KEY,
+          teacherId: timetableData.teacher.id,
+          token,
+          records: timetableData.students || []
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || `Save failed with HTTP ${response.status}`);
+      timetableData.version = Number(data.version || timetableData.version || 0);
+      lastLoadedVersion = timetableData.version;
+      $("studentSaveStatus").textContent = `Saved ${clockLabel(new Date())}`;
+      setSyncChip(`Auto-sync: ${clockLabel(new Date())}`);
+    }
+
+    function scheduleStudentSave() {
+      clearTimeout(studentSaveTimer);
+      $("studentSaveStatus").textContent = "Editing...";
+      studentSaveTimer = setTimeout(() => {
+        saveTeacherStudents().catch(error => {
+          $("studentSaveStatus").textContent = "Save failed";
+          setStatus(`Student note save failed: ${error.message}`, "warn");
+        });
+      }, 900);
+    }
+
+    function renderMonthList() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      const entries = classEntries(from, monthEnd);
+      monthListPage = clampPage(monthListPage, entries.length);
+      const monthPageData = pageSlice(entries, monthListPage);
+      monthListPage = monthPageData.page;
+      const rows = monthPageData.items.map((entry, index) => {
+        const meta = entryMeta(entry);
+        return [
+          String(monthPageData.start + index + 1),
+          escapeHtml(dateLabel(entry.date)),
+          escapeHtml(timeLabel(entry.time)),
+          escapeHtml(meta.studentName),
+          escapeHtml(meta.subject),
+          escapeHtml(meta.type),
+          escapeHtml(statusLabel(meta.status)),
+          escapeHtml(meta.remark)
+        ];
+      });
+      $("monthList").innerHTML = rows.length ? tableHtml(["No.", "Date", "Time", "Student", "Subject", "Type", "Status", "Remark"], rows) + pagerHtml("monthList", monthListPage, entries.length) : `<div class="subtle" style="padding:12px;">No classes in selected month.</div>`;
+      const summary = monthlyTeachingSummary(month, year);
+      $("metricTotal").textContent = summary.entries.length;
+      $("metricCompleted").textContent = summary.completedCount;
+      $("metricNotShow").textContent = summary.notShowCount;
+      $("metricCancelled").textContent = summary.cancelledCount;
+    }
+
+    function renderLeaveList() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      const leaveEntries = classEntries(from, monthEnd)
+        .filter(entry => CANCELLED.includes(entryMeta(entry).status) || entryMeta(entry).status === "student_not_show");
+      leaveListPage = clampPage(leaveListPage, leaveEntries.length);
+      const leavePageData = pageSlice(leaveEntries, leaveListPage);
+      leaveListPage = leavePageData.page;
+      const rows = leavePageData.items.map((entry, index) => {
+          const meta = entryMeta(entry);
+          return [
+            String(leavePageData.start + index + 1),
+            escapeHtml(dateLabel(entry.date)),
+            escapeHtml(timeLabel(entry.time)),
+            escapeHtml(meta.studentName),
+            escapeHtml(meta.subject),
+            escapeHtml(statusLabel(meta.status)),
+            escapeHtml(meta.remark)
+          ];
+        });
+      $("leaveList").innerHTML = rows.length ? tableHtml(["No.", "Date", "Time", "Student", "Subject", "Status", "Remark"], rows) + pagerHtml("leaveList", leaveListPage, leaveEntries.length) : `<div class="subtle" style="padding:12px;">No cancelled, leave, public holiday, or not-show records in selected month.</div>`;
+    }
+
+    function renderIncomeBreakdown(summary) {
+      const panel = $("incomeBreakdownPanel");
+      if (!panel) return;
+      if (summary.incomeMode !== "profit_share") {
+        panel.classList.add("hide");
+        panel.innerHTML = "";
+        return;
+      }
+      const rows = (summary.studentIncomeRows || []).map((row, index) => [
+        String(index + 1),
+        escapeHtml(row.studentName || "Student"),
+        row.packageIncomplete
+          ? `<span class="pill warn">Package incomplete</span>`
+          : `<strong>${escapeHtml(row.packageName || "Package")}</strong><br><span class="subtle">${escapeHtml(money(row.packageAmount))} / ${Number(row.packageTotalClasses || 0)}</span>`,
+        row.packageIncomplete ? "-" : escapeHtml(money(row.lessonRate)),
+        `${Number(row.profitSharePercentage || summary.profitSharePercentage || 0).toFixed(2)}%`,
+        Number(row.completedLessons || 0),
+        row.packageIncomplete ? "-" : escapeHtml(money(row.teacherRatePerLesson)),
+        row.packageIncomplete ? "-" : escapeHtml(money(row.income))
+      ]);
+      const warnings = (summary.packageWarnings || []).length
+        ? `<div class="status warn" style="margin:10px 0 0;">Some rows need package setup in the Admin Portal.</div>`
+        : "";
+      panel.innerHTML = `
+        <div class="metric" style="margin-bottom:10px;">
+          <span>Income Breakdown</span>
+          <strong>${escapeHtml(money(summary.lessonPay))}</strong>
+          <div class="subtle">Micro Franchisee profit share: ${Number(summary.profitSharePercentage || 0).toFixed(2)}%</div>
+        </div>
+        ${rows.length ? tableHtml(["No.", "Student", "Package", "Lesson Rate", "Share", "Completed", "Teacher / Lesson", "Income"], rows) : `<div class="subtle" style="padding:12px;">No completed package-share lessons in selected month.</div>`}
+        ${warnings}`;
+      panel.classList.remove("hide");
+    }
+
+    function renderIncomeHistory() {
+      const { month, year } = selectedMonthRange();
+      const summary = monthlyTeachingSummary(month, year);
+      const entries = summary.entries.filter(entry => incomePayForEntry(entry) > 0);
+      $("metricIncome").textContent = money(summary.incomeTotal);
+      renderIncomeBreakdown(summary);
+      incomeListPage = clampPage(incomeListPage, entries.length);
+      const incomePageData = pageSlice(entries, incomeListPage);
+      incomeListPage = incomePageData.page;
+      const rows = incomePageData.items.map((entry, index) => {
+        const meta = entryMeta(entry);
+        return [
+          String(incomePageData.start + index + 1),
+          escapeHtml(dateLabel(entry.date)),
+          escapeHtml(timeLabel(entry.time)),
+          escapeHtml(meta.studentName),
+          escapeHtml(meta.subject),
+          escapeHtml(meta.type),
+          escapeHtml(statusLabel(meta.status)),
+          escapeHtml(money(incomePayForEntry(entry)))
+        ];
+      });
+      $("incomeList").innerHTML = rows.length ? tableHtml(["No.", "Date", "Time", "Student", "Subject", "Type", "Status", "Pay"], rows) + pagerHtml("incomeList", incomeListPage, entries.length) : `<div class="subtle" style="padding:12px;">No income counted yet for the selected month.</div>`;
+    }
+
+    function selectedMonthCalendarDates(year, month) {
+      const startISO = localISO(mondayOf(new Date(year, month, 1)));
+      const endISO = dateOffsetISO(localISO(mondayOf(new Date(year, month + 1, 0))), 6);
+      const dates = [];
+      for (let cursor = startISO; cursor <= endISO; cursor = dateOffsetISO(cursor, 1)) {
+        dates.push(parseISODate(cursor));
+      }
+      return dates;
+    }
+
+    function groupedEntriesByDate(fromISO, toISO) {
+      const grouped = new Map();
+      classEntries(fromISO, toISO).forEach(entry => {
+        if (!grouped.has(entry.date)) grouped.set(entry.date, []);
+        grouped.get(entry.date).push(entry);
+      });
+      grouped.forEach(items => items.sort((a, b) => minutes(a.time) - minutes(b.time)));
+      return grouped;
+    }
+
+    function ensureMonthlySelectedDate() {
+      ensureDailyDateForSelectedMonth(true);
+      const selected = parseISODate(selectedDailyDateISO || todayISO());
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      if (selected.getMonth() !== month || selected.getFullYear() !== year) {
+        selectedDailyDateISO = localISO(new Date(year, month, 1));
+      }
+    }
+
+    function compactMonthlyPreview(entry) {
+      const meta = entryMeta(entry);
+      const display = `${timeLabel(entry.time)} ${meta.studentName || "Class"}`;
+      return `<div class="monthly-preview-item ${typeClass(meta.type)} ${statusClass(meta.status)}" title="${escapeHtml(display)}">${escapeHtml(display)}</div>`;
+    }
+
+    function renderMonthlySelectedDay(grouped) {
+      const entries = grouped.get(selectedDailyDateISO) || [];
+      $("monthlySelectedDateTitle").textContent = dailyHeaderLabel(selectedDailyDateISO);
+      $("monthlySelectedDateContext").textContent = `${dateLabel(selectedDailyDateISO)} · ${entries.length} class${entries.length === 1 ? "" : "es"}`;
+      $("monthlySelectedClasses").innerHTML = entries.length
+        ? entries.map(classCardHtml).join("")
+        : `<div class="daily-empty"><strong>No classes scheduled for this date.</strong><span>${escapeHtml(dateLabel(selectedDailyDateISO))}</span></div>`;
+    }
+
+    function renderMonthlyCalendarView() {
+      if (!timetableData || !$("monthlyCalendarGrid")) return;
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      ensureMonthlySelectedDate();
+      const dates = selectedMonthCalendarDates(year, month);
+      const fromISO = localISO(dates[0]);
+      const toISO = localISO(dates[dates.length - 1]);
+      const grouped = groupedEntriesByDate(fromISO, toISO);
+      $("monthlyCalendarTitle").textContent = `${MONTHS[month]} ${year}`;
+      $("monthlyCalendarContext").textContent = selectedDailyDateISO === todayISO() ? "Today selected" : `${dateLabel(selectedDailyDateISO)} selected`;
+      const weekdayHeader = DAYS.map(day => `<div class="monthly-calendar-weekday">${escapeHtml(day.slice(0, 3))}</div>`).join("");
+      const today = todayISO();
+      const dayCells = dates.map(date => {
+        const dateISO = localISO(date);
+        const entries = grouped.get(dateISO) || [];
+        const inMonth = date.getMonth() === month;
+        const selected = dateISO === selectedDailyDateISO;
+        const previews = entries.slice(0, 3).map(compactMonthlyPreview).join("");
+        const more = entries.length > 3 ? `<div class="monthly-preview-more">+${entries.length - 3} more</div>` : "";
+        const label = `${date.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}, ${entries.length} class${entries.length === 1 ? "" : "es"}`;
+        return `<button type="button" class="monthly-calendar-day${inMonth ? "" : " outside-month"}${dateISO === today ? " today" : ""}${selected ? " selected" : ""}${entries.length ? " has-classes" : ""}" data-monthly-date="${dateISO}" aria-label="${escapeHtml(label)}" aria-pressed="${selected ? "true" : "false"}">
+          <span class="monthly-date-number">${date.getDate()}</span>
+          <span class="monthly-class-count">${entries.length ? `${entries.length} class${entries.length === 1 ? "" : "es"}` : "No classes"}</span>
+          <div class="monthly-preview-list">${previews}${more}</div>
+        </button>`;
+      }).join("");
+      $("monthlyCalendarGrid").innerHTML = weekdayHeader + dayCells;
+      renderMonthlySelectedDay(grouped);
+    }
+
+    function expandedWeekLabel(startISO, index, year) {
+      const start = parseISODate(startISO);
+      const endISO = dateOffsetISO(startISO, 6);
+      const end = parseISODate(endISO);
+      const startText = start.getMonth() === end.getMonth()
+        ? String(start.getDate())
+        : start.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      const endOptions = { day: "numeric", month: "short" };
+      if (end.getFullYear() !== year) endOptions.year = "numeric";
+      const endText = end.toLocaleDateString("en-GB", endOptions);
+      return `Week ${index + 1} · ${startText}–${endText}`;
+    }
+
+    function renderExpandedMonthView({ focusSelectedWeek = false } = {}) {
+      if (!timetableData || !$("expandedMonthWeeks")) return;
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      ensureMonthlySelectedDate();
+      const monthStartISO = localISO(new Date(year, month, 1));
+      const monthEndISO = localISO(new Date(year, month + 1, 0));
+      const activeMonthEntries = classEntries(monthStartISO, monthEndISO);
+      const weekStarts = weeksForMonth(year, month);
+      const selectedWeek = selectedWeekStartISO && weekIntersectsMonth(selectedWeekStartISO, year, month)
+        ? selectedWeekStartISO
+        : localISO(mondayOf(parseISODate(selectedDailyDateISO)));
+      const expandedEntries = weekStarts.length
+        ? classEntries(weekStarts[0], dateOffsetISO(weekStarts[weekStarts.length - 1], 6))
+        : [];
+      $("expandedMonthTitle").textContent = `${MONTHS[month]} ${year}`;
+      $("expandedMonthContext").textContent = `${weekStarts.length} week${weekStarts.length === 1 ? "" : "s"} · ${activeMonthEntries.length} class${activeMonthEntries.length === 1 ? "" : "es"} in selected month`;
+      $("expandedMonthWeeks").innerHTML = weekStarts.map((startISO, index) => {
+        const datesInWeek = weekDates(startISO);
+        const endISO = localISO(datesInWeek[6]);
+        const weekEntries = expandedEntries.filter(entry => entry.date >= startISO && entry.date <= endISO);
+        const current = startISO === localISO(mondayOf(new Date()));
+        return `<article class="expanded-month-week${current ? " is-current-week" : ""}" data-expanded-week="${escapeHtml(startISO)}">
+          <div class="expanded-month-week-header">
+            <span><strong>${escapeHtml(expandedWeekLabel(startISO, index, year))}</strong><span>${escapeHtml(dateLabel(startISO))} - ${escapeHtml(dateLabel(dateOffsetISO(startISO, 6)))}</span></span>
+            <span class="pill">${weekEntries.length} class${weekEntries.length === 1 ? "" : "es"}</span>
+          </div>
+          <div class="timetable-wrap">${weekTableHtml(datesInWeek, { month })}</div>
+        </article>`;
+      }).join("");
+      if (focusSelectedWeek) {
+        requestAnimationFrame(() => {
+          const selectedNode = document.querySelector(`[data-expanded-week="${selectedWeek}"]`);
+          selectedNode?.scrollIntoView({ block: "start", behavior: "smooth" });
+        });
+      }
+    }
+
+    function updateCalendarModeButtons() {
+      document.body.classList.toggle("teacher-calendar-monthly", calendarMode === "monthly");
+      document.body.classList.toggle("teacher-calendar-expanded", calendarMode === "expanded");
+      document.body.classList.toggle("teacher-calendar-weekly", calendarMode === "weekly");
+      document.querySelectorAll("[data-calendar-mode]").forEach(button => {
+        const active = button.dataset.calendarMode === calendarMode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    function setCalendarMode(mode, { render = true } = {}) {
+      const previousMode = calendarMode;
+      calendarMode = normalizeCalendarMode(mode);
+      teacherViewLocalSet("teacherViewCalendarMode", calendarMode);
+      ensureDailyDateForSelectedMonth(true);
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      if (!selectedWeekStartISO || !weekIntersectsMonth(selectedWeekStartISO, year, month) || previousMode !== "weekly") {
+        if (selectedDailyDateISO) selectedWeekStartISO = localISO(mondayOf(parseISODate(selectedDailyDateISO)));
+      }
+      updateCalendarModeButtons();
+      if (!render || !timetableData) return;
+      if (calendarMode === "monthly") renderMonthlyCalendarView();
+      else if (calendarMode === "expanded") renderExpandedMonthView({ focusSelectedWeek: true });
+      else {
+        renderMonthCalendar();
+        renderDailyNavigator();
+      }
+      persistTeacherViewSelection();
+    }
+
+    async function navigateMonth(offset) {
+      const currentMonth = Number($("monthSelect").value);
+      const currentYear = Number($("yearSelect").value);
+      const target = new Date(currentYear, currentMonth + offset, 1);
+      const minimum = new Date(FIRST_VIEW_YEAR, FIRST_VIEW_MONTH, 1);
+      if (target < minimum) return;
+      ensureYearOption(target.getFullYear());
+      $("yearSelect").value = String(target.getFullYear());
+      fillMonthSelect(target.getFullYear(), target.getMonth());
+      $("monthSelect").value = String(target.getMonth());
+      selectedDailyDateISO = localISO(target);
+      selectedWeekStartISO = localISO(mondayOf(target));
+      persistTeacherViewSelection();
+      await loadTimetable();
+    }
+
+    async function goToTodayMonth() {
+      const now = new Date();
+      ensureYearOption(now.getFullYear());
+      $("yearSelect").value = String(now.getFullYear());
+      fillMonthSelect(now.getFullYear(), now.getMonth());
+      $("monthSelect").value = String(now.getMonth());
+      selectedDailyDateISO = localISO(now);
+      selectedWeekStartISO = localISO(mondayOf(now));
+      persistTeacherViewSelection();
+      await loadTimetable();
+      if (calendarMode === "expanded") renderExpandedMonthView({ focusSelectedWeek: true });
+    }
+
+    async function selectMonthlyDate(dateISO) {
+      const target = parseISODate(dateISO);
+      const minimum = new Date(FIRST_VIEW_YEAR, FIRST_VIEW_MONTH, 1);
+      if (target < minimum) return;
+      selectedDailyDateISO = dateISO;
+      selectedWeekStartISO = localISO(mondayOf(target));
+      const currentMonth = Number($("monthSelect").value);
+      const currentYear = Number($("yearSelect").value);
+      persistTeacherViewSelection();
+      if (target.getMonth() !== currentMonth || target.getFullYear() !== currentYear) {
+        ensureYearOption(target.getFullYear());
+        $("yearSelect").value = String(target.getFullYear());
+        fillMonthSelect(target.getFullYear(), target.getMonth());
+        $("monthSelect").value = String(target.getMonth());
+        await loadTimetable();
+      } else {
+        renderMonthlyCalendarView();
+      }
+    }
+
+    function selectedIncomeReportEntries() {
+      const { from, month, year } = selectedMonthRange();
+      const monthEnd = localISO(new Date(year, month + 1, 0));
+      return classEntries(from, monthEnd).filter(entry => incomePayForEntry(entry) > 0);
+    }
+
+    function exportIncomePdf() {
+      if (!timetableData) return;
+      const month = Number($("monthSelect").value);
+      const year = Number($("yearSelect").value);
+      const monthLabel = `${MONTHS[month]} ${year}`;
+      const teacherName = timetableData?.teacher?.name || "Teacher";
+      const entries = selectedIncomeReportEntries();
+      const completedCount = entries.filter(isPaidCompletedEntry).length;
+      const notShowCount = entries.filter(entry => entryMeta(entry).status === "student_not_show").length;
+      const total = entries.reduce((sum, entry) => sum + incomePayForEntry(entry), 0);
+      const rows = entries.map((entry, index) => {
+        const meta = entryMeta(entry);
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(dateLabel(entry.date))}</td>
+          <td>${escapeHtml(timeLabel(entry.time))}</td>
+          <td>${escapeHtml(meta.studentName || "")}</td>
+          <td>${escapeHtml(meta.subject || "")}</td>
+          <td>${escapeHtml(meta.type || "")}</td>
+          <td>${escapeHtml(statusLabel(meta.status))}</td>
+          <td>${escapeHtml(money(incomePayForEntry(entry)))}</td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="8">No completed or payable classes counted for this month yet.</td></tr>`;
+      const popup = window.open("", "_blank");
+      if (!popup) return alert("Please allow popups to export PDF.");
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(teacherName)} ${escapeHtml(monthLabel)} Income</title>
+        <style>
+          body { font-family: Arial, sans-serif; color:#17231f; padding:24px; }
+          h1 { margin:0 0 4px; font-size:24px; }
+          .subtle { color:#647067; margin-bottom:18px; }
+          .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:18px 0; }
+          .metric { border:1px solid #dbe8e1; border-radius:8px; padding:12px; }
+          .metric span { color:#647067; font-size:12px; font-weight:700; }
+          .metric strong { display:block; margin-top:6px; font-size:20px; }
+          table { width:100%; border-collapse:collapse; font-size:12px; }
+          th,td { border:1px solid #dbe8e1; padding:8px; text-align:left; vertical-align:top; }
+          th { background:#72D0A1; color:#17231f; }
+          @media print { button { display:none; } body { padding:0; } }
+        </style></head><body>
+        <button onclick="window.print()" style="float:right;padding:8px 12px;">Print / Save PDF</button>
+        <h1>${escapeHtml(teacherName)} - Completed Lessons & Income</h1>
+        <div class="subtle">${escapeHtml(monthLabel)} | Generated ${escapeHtml(new Date().toLocaleString())}</div>
+        <div class="metrics">
+          <div class="metric"><span>Payable Classes</span><strong>${entries.length}</strong></div>
+          <div class="metric"><span>Completed</span><strong>${completedCount}</strong></div>
+          <div class="metric"><span>Student Not Show</span><strong>${notShowCount}</strong></div>
+          <div class="metric"><span>Total Income</span><strong>${escapeHtml(money(total))}</strong></div>
+        </div>
+        <table><thead><tr><th>No.</th><th>Date</th><th>Time</th><th>Student</th><th>Subject</th><th>Type</th><th>Status</th><th>Pay</th></tr></thead><tbody>${rows}</tbody></table>
+      </body></html>`);
+      popup.document.close();
+      popup.focus();
+      setTimeout(() => popup.print(), 250);
+    }
+
+    function renderVisibility() {
+      updateCalendarModeButtons();
+      $("monthCalendarSection").classList.remove("hide");
+      $("monthlySection").classList.remove("hide");
+      $("monthlyCalendarViewSection").classList.remove("hide");
+      $("expandedMonthViewSection").classList.remove("hide");
+    }
+
+	    function renderAll() {
+	      if (!timetableData) return;
+	      renderMonthCalendar();
+	      renderMonthlyCalendarView();
+	      renderExpandedMonthView();
+	      renderDailyNavigator();
+      renderMonthList();
+      renderLeaveList();
+      renderIncomeHistory();
+      renderTeacherStudents();
+      if (incentiveClaimLoadedKey === selectedClaimMonthKey()) renderIncentiveClaim();
+      renderVisibility();
+    }
+
+	    $("monthSelect").addEventListener("change", () => {
+	      monthListPage = 1;
+	      leaveListPage = 1;
+	      incomeListPage = 1;
+        persistTeacherViewSelection();
+	      ensureDailyDateForSelectedMonth(false);
+	      resetSelectedWeek(true);
+        if (selectedDailyDateISO) selectedWeekStartISO = localISO(mondayOf(parseISODate(selectedDailyDateISO)));
+	      loadTimetable().catch(error => showTimetableLoadFailure(error));
+	    });
+    $("yearSelect").addEventListener("change", () => {
+	      monthListPage = 1;
+	      leaveListPage = 1;
+	      incomeListPage = 1;
+	      fillMonthSelect(Number($("yearSelect").value), Number($("monthSelect").value));
+        persistTeacherViewSelection();
+	      ensureDailyDateForSelectedMonth(false);
+	      resetSelectedWeek(true);
+        if (selectedDailyDateISO) selectedWeekStartISO = localISO(mondayOf(parseISODate(selectedDailyDateISO)));
+	      loadTimetable().catch(error => showTimetableLoadFailure(error));
+	    });
+	    $("refreshBtn").addEventListener("click", () => loadTimetable({ force: true }).catch(error => showTimetableLoadFailure(error)));
+    document.querySelectorAll("[data-calendar-mode]").forEach(button => {
+      button.addEventListener("click", () => setCalendarMode(button.dataset.calendarMode));
+    });
+    $("previousMonthBtn").addEventListener("click", () => navigateMonth(-1).catch(error => showTimetableLoadFailure(error)));
+    $("nextMonthBtn").addEventListener("click", () => navigateMonth(1).catch(error => showTimetableLoadFailure(error)));
+    $("monthlyTodayBtn").addEventListener("click", () => goToTodayMonth().catch(error => showTimetableLoadFailure(error)));
+    $("monthlyCalendarGrid").addEventListener("click", event => {
+      const button = event.target.closest("[data-monthly-date]");
+      if (!button) return;
+      selectMonthlyDate(button.dataset.monthlyDate).catch(error => showTimetableLoadFailure(error));
+    });
+    $("expandedPreviousMonthBtn").addEventListener("click", () => navigateMonth(-1).catch(error => showTimetableLoadFailure(error)));
+    $("expandedNextMonthBtn").addEventListener("click", () => navigateMonth(1).catch(error => showTimetableLoadFailure(error)));
+    $("expandedTodayBtn").addEventListener("click", () => goToTodayMonth().catch(error => showTimetableLoadFailure(error)));
+	    $("previousWeekBtn").addEventListener("click", () => navigateWeek(-1).catch(error => showTimetableLoadFailure(error)));
+	    $("nextWeekBtn").addEventListener("click", () => navigateWeek(1).catch(error => showTimetableLoadFailure(error)));
+	    $("previousDayBtn").addEventListener("click", () => navigateDaily(-1).catch(error => showTimetableLoadFailure(error)));
+	    $("nextDayBtn").addEventListener("click", () => navigateDaily(1).catch(error => showTimetableLoadFailure(error)));
+	    $("dailyWeekStrip").addEventListener("click", event => {
+	      const button = event.target.closest("[data-daily-date]");
+	      if (!button) return;
+	      selectDailyDate(button.dataset.dailyDate).catch(error => showTimetableLoadFailure(error));
+	    });
+    $("monthCalendarSection").addEventListener("touchstart", event => {
+      if (event.touches.length !== 1 || event.target.closest(".timetable-wrap")) {
+        weekSwipeStart = null;
+        return;
+      }
+      weekSwipeStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }, { passive: true });
+	    $("monthCalendarSection").addEventListener("touchend", event => {
+	      if (!weekSwipeStart || !event.changedTouches.length) return;
+	      const deltaX = event.changedTouches[0].clientX - weekSwipeStart.x;
+	      const deltaY = event.changedTouches[0].clientY - weekSwipeStart.y;
+	      weekSwipeStart = null;
+	      if (Math.abs(deltaX) < 55 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return;
+	      navigateWeek(deltaX < 0 ? 1 : -1).catch(error => setStatus(error.message, "error"));
+	    }, { passive: true });
+	    $("dailyNavigatorSection").addEventListener("touchstart", event => {
+	      if (event.touches.length !== 1) {
+	        dailySwipeStart = null;
+	        return;
+	      }
+	      dailySwipeStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+	    }, { passive: true });
+	    $("dailyNavigatorSection").addEventListener("touchend", event => {
+	      if (!dailySwipeStart || !event.changedTouches.length) return;
+	      const deltaX = event.changedTouches[0].clientX - dailySwipeStart.x;
+	      const deltaY = event.changedTouches[0].clientY - dailySwipeStart.y;
+	      dailySwipeStart = null;
+	      if (Math.abs(deltaX) < 45 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return;
+	      navigateDaily(deltaX < 0 ? 1 : -1).catch(error => setStatus(error.message, "error"));
+	    }, { passive: true });
+    $("exportIncomePdfBtn").addEventListener("click", exportIncomePdf);
+    $("claimYearSelect").addEventListener("change", () => {
+      fillClaimMonthSelect(Number($("claimYearSelect").value), Number($("claimMonthSelect").value));
+      persistTeacherClaimSelection();
+      incentiveClaimLoadedKey = "";
+      $("claimLoadStatus").textContent = "Click Load Month to view this claim period.";
+    });
+    $("claimMonthSelect").addEventListener("change", () => {
+      persistTeacherClaimSelection();
+      incentiveClaimLoadedKey = "";
+      $("claimLoadStatus").textContent = "Click Load Month to view this claim period.";
+    });
+    $("loadClaimBtn").addEventListener("click", () => loadClaimMonth().catch(error => {
+      $("claimLoadStatus").textContent = `Could not load claim month: ${error.message}`;
+    }));
+    $("saveClaimBtn").addEventListener("click", () => saveIncentiveClaim().catch(error => {
+      $("claimLoadStatus").textContent = `Claim was not saved: ${error.message}`;
+    }));
+    $("exportClaimPdfBtn").addEventListener("click", exportClaimPdf);
+    [
+      ["Birthday", false],
+      ["BestTeacher", false],
+      ["GoogleReview", true],
+      ["TrialEnrollment", true]
+    ].forEach(([prefix, quantityEnabled]) => {
+      $(`claim${prefix}`).addEventListener("change", () => {
+        toggleRewardFields(prefix, quantityEnabled);
+        renderIncentiveClaim();
+      });
+    });
+    $("claimsView").addEventListener("input", event => {
+      if (event.target.matches("input")) renderIncentiveClaim();
+    });
+    document.addEventListener("click", event => {
+      const pageButton = event.target.closest("[data-page]");
+      if (!pageButton) return;
+      const [kind, direction] = pageButton.dataset.page.split("|");
+      const delta = direction === "next" ? 1 : -1;
+      const scrollTargets = {
+        teacherStudents: "studentListTable",
+        monthList: "monthList",
+        leaveList: "leaveList",
+        incomeList: "incomeList"
+      };
+      if (kind === "teacherStudents") { teacherStudentPage += delta; renderTeacherStudents(); }
+      if (kind === "monthList") { monthListPage += delta; renderMonthList(); }
+      if (kind === "leaveList") { leaveListPage += delta; renderLeaveList(); }
+      if (kind === "incomeList") { incomeListPage += delta; renderIncomeHistory(); }
+      scrollToListStart(scrollTargets[kind]);
+    });
+    document.querySelectorAll("[data-view-tab]").forEach(button => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-view-tab]").forEach(item => item.classList.toggle("active", item === button));
+        $("timetableView").classList.toggle("hide", button.dataset.viewTab !== "timetable");
+        $("studentsView").classList.toggle("hide", button.dataset.viewTab !== "students");
+        $("claimsView").classList.toggle("hide", button.dataset.viewTab !== "claims");
+        if (button.dataset.viewTab === "claims" && timetableData && incentiveClaimLoadedKey !== selectedClaimMonthKey()) {
+          loadIncentiveClaim();
+        }
+      });
+    });
+    $("studentListTable").addEventListener("input", event => {
+      const field = event.target.dataset.field;
+      const id = event.target.dataset.studentNote;
+      if (!id || !field) return;
+      updateLocalStudentNote(id, field, event.target.value);
+      scheduleStudentSave();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) autoSyncTimetable();
+    });
+    window.addEventListener("storage", event => {
+      if (event.key === "classone_teacher_view_version") autoSyncTimetable();
+    });
+    if ("BroadcastChannel" in window) {
+      const timetableChannel = new BroadcastChannel("classone_timetable_updates");
+      timetableChannel.addEventListener("message", event => {
+        if (Number(event.data?.version || 0) > lastLoadedVersion) autoSyncTimetable();
+      });
+    }
+
+    fillControls();
+    {
+      const savedMode = teacherViewLocalGet("teacherViewCalendarMode", "weekly");
+      calendarMode = normalizeCalendarMode(savedMode);
+    }
+    updateCalendarModeButtons();
+    persistTeacherViewSelection();
+    persistTeacherClaimSelection();
+    loadTimetable()
+      .then(startAutoSync)
+      .catch(error => showTimetableLoadFailure(error));
+  </script>
+</body>
+</html>
