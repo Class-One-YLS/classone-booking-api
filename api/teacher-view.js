@@ -9,7 +9,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.07.15-micro-franchise-package-lookup.1";
+const API_BUILD = "2026.08.03-public-holiday-resolver.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -1012,7 +1012,36 @@ async function loadState(req, from, to) {
         select jsonb_agg(note.value)
         from jsonb_array_elements(coalesce(source.data->'teacherStudentNotes', '[]'::jsonb)) as note(value)
         where note.value->>'teacherId' = teacher_match.teacher->>'id'
-      ), '[]'::jsonb) as teacher_student_notes
+      ), '[]'::jsonb) as teacher_student_notes,
+      coalesce((
+        select jsonb_agg(holiday.value)
+        from jsonb_array_elements(coalesce(source.data->'publicHolidays', '[]'::jsonb)) as holiday(value)
+        where lower(coalesce(holiday.value->>'status', 'active')) not in ('deleted', 'removed', 'archived')
+          and lower(coalesce(holiday.value->>'deleted', 'false')) not in ('true', '1', 'yes')
+          and (
+            ${from} = ''
+            or coalesce(holiday.value->>'endDate', holiday.value->>'date', holiday.value->>'startDate', '') >= ${from}
+          )
+          and (
+            ${to} = ''
+            or coalesce(holiday.value->>'startDate', holiday.value->>'date', '') <= ${to}
+          )
+      ), '[]'::jsonb) as public_holidays,
+      coalesce((
+        select jsonb_agg(leave.value)
+        from jsonb_array_elements(coalesce(source.data->'teacherLeaves', '[]'::jsonb)) as leave(value)
+        where leave.value->>'teacherId' = teacher_match.teacher->>'id'
+          and lower(coalesce(leave.value->>'status', 'active')) not in ('deleted', 'removed', 'archived', 'cancelled', 'canceled')
+          and lower(coalesce(leave.value->>'deleted', 'false')) not in ('true', '1', 'yes')
+          and (
+            ${from} = ''
+            or coalesce(leave.value->>'endDate', leave.value->>'date', leave.value->>'startDate', '') >= ${from}
+          )
+          and (
+            ${to} = ''
+            or coalesce(leave.value->>'startDate', leave.value->>'date', '') <= ${to}
+          )
+      ), '[]'::jsonb) as teacher_leaves
     from source
     left join teacher_match on true
   `;
@@ -1027,7 +1056,9 @@ async function loadState(req, from, to) {
       teachers: [row.teacher],
       bookings: Array.isArray(row.bookings) ? row.bookings : [],
       students: Array.isArray(row.students) ? row.students : [],
-      teacherStudentNotes: Array.isArray(row.teacher_student_notes) ? row.teacher_student_notes : []
+      teacherStudentNotes: Array.isArray(row.teacher_student_notes) ? row.teacher_student_notes : [],
+      publicHolidays: Array.isArray(row.public_holidays) ? row.public_holidays : [],
+      teacherLeaves: Array.isArray(row.teacher_leaves) ? row.teacher_leaves : []
     } : null
   };
 }

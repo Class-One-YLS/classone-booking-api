@@ -173,6 +173,111 @@ function mergePatchIntoState(currentState = {}, patch = {}) {
   return merged;
 }
 
+function dateOnly(value) {
+  return String(value || "").slice(0, 10);
+}
+
+function minutes(value) {
+  const [hh, mm] = String(value || "").split(":").map(Number);
+  return (hh || 0) * 60 + (mm || 0);
+}
+
+function dateRangesOverlap(a = {}, b = {}) {
+  const aStart = dateOnly(a.startDate) || "0000-01-01";
+  const aEnd = dateOnly(a.endDate) || "9999-12-31";
+  const bStart = dateOnly(b.startDate) || "0000-01-01";
+  const bEnd = dateOnly(b.endDate) || "9999-12-31";
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+function timeRangesOverlap(a = {}, b = {}) {
+  const aStart = minutes(a.time || a.startTime);
+  const bStart = minutes(b.time || b.startTime);
+  const aEnd = aStart + Math.max(1, Number(a.minutes || a.duration || 30));
+  const bEnd = bStart + Math.max(1, Number(b.minutes || b.duration || 30));
+  return aStart < bEnd && bStart < aEnd;
+}
+
+function activeScheduleRecord(record) {
+  return Boolean(record) && !record.archived && !record.deleted && record.status !== "deleted";
+}
+
+function openSlotCoversStudentSlot(slot = {}, studentSlot = {}) {
+  if (!activeScheduleRecord(slot)) return false;
+  if (slot.locked || slot.studentId || slot.studentName) return false;
+  if (slot.unavailable || String(slot.status || "").toLowerCase() === "off") return false;
+  if (String(slot.day || slot.weekday || "") !== String(studentSlot.day || "")) return false;
+  if (!timeRangesOverlap(slot, studentSlot)) return false;
+  if (!dateRangesOverlap(slot, studentSlot)) return false;
+  const slotStart = dateOnly(slot.startDate);
+  const slotEnd = dateOnly(slot.endDate);
+  const studentStart = dateOnly(studentSlot.startDate);
+  const studentEnd = dateOnly(studentSlot.endDate) || "9999-12-31";
+  if (slotStart && studentStart && slotStart > studentStart) return false;
+  if (slotEnd && slotEnd < studentEnd) return false;
+  return true;
+}
+
+function validatePatchedStudentRegularSlots(mergedState = {}, patch = {}, currentState = {}) {
+  const patchedStudents = Array.isArray(patch.changes?.students) ? patch.changes.students : [];
+  if (!patchedStudents.length) return null;
+  const teachersById = new Map((mergedState.teachers || []).map(teacher => [String(teacher.id || ""), teacher]));
+  const currentTeachersById = new Map((currentState.teachers || []).map(teacher => [String(teacher.id || ""), teacher]));
+  for (const student of patchedStudents) {
+    for (const studentSlot of (student.regularSlots || [])) {
+      if (!activeScheduleRecord(studentSlot) || !studentSlot.teacherId || !studentSlot.day || !studentSlot.time) continue;
+      const teacher = teachersById.get(String(studentSlot.teacherId || ""));
+      const currentTeacher = currentTeachersById.get(String(studentSlot.teacherId || ""));
+      if (!teacher || teacher.archived || teacher.deleted || teacher.status === "disabled") {
+        return {
+          teacherId: studentSlot.teacherId,
+          day: studentSlot.day,
+          time: studentSlot.time,
+          error: "Selected teacher is no longer active."
+        };
+      }
+      const hasExistingLinkedSlot = (currentTeacher?.regularSlots || []).some(slot => {
+        if (!activeScheduleRecord(slot)) return false;
+        if (!slot.locked) return false;
+        if (String(slot.studentSlotId || "") !== String(studentSlot.id || "")) return false;
+        if (String(slot.studentId || "") !== String(student.id || "")) return false;
+        if (String(slot.day || slot.weekday || "") !== String(studentSlot.day || "")) return false;
+        if (!dateRangesOverlap(slot, studentSlot)) return false;
+        return timeRangesOverlap(slot, studentSlot);
+      });
+      const hasOpenSlot = (currentTeacher?.regularSlots || teacher.regularSlots || []).some(slot => openSlotCoversStudentSlot(slot, studentSlot));
+      if (!hasExistingLinkedSlot && !hasOpenSlot) {
+        return {
+          teacherId: studentSlot.teacherId,
+          day: studentSlot.day,
+          time: studentSlot.time,
+          error: `${teacher.name || teacher.teacherName || "Teacher"} is not available on ${studentSlot.day} at ${studentSlot.time} for the selected regular class period.`
+        };
+      }
+      const conflict = (teacher.regularSlots || []).find(slot => {
+        if (!activeScheduleRecord(slot)) return false;
+        if (!slot.locked || !slot.studentId) return false;
+        if (String(slot.studentSlotId || "") === String(studentSlot.id || "")) return false;
+        if (String(slot.studentId || "") === String(student.id || "")) return false;
+        if (String(slot.day || slot.weekday || "") !== String(studentSlot.day || "")) return false;
+        if (!dateRangesOverlap(slot, studentSlot)) return false;
+        return timeRangesOverlap(slot, studentSlot);
+      });
+      if (conflict) {
+        return {
+          teacherId: studentSlot.teacherId,
+          day: studentSlot.day,
+          time: studentSlot.time,
+          conflictingStudentName: conflict.studentName || "",
+          conflictingClassType: conflict.type || "regular class",
+          error: `${teacher.name || teacher.teacherName || "Teacher"} already has ${conflict.studentName || "another student"} on ${studentSlot.day} at ${studentSlot.time}.`
+        };
+      }
+    }
+  }
+  return null;
+}
+
 function splitText(text, chunkSize = 350000) {
   const chunks = [];
   for (let index = 0; index < text.length; index += chunkSize) chunks.push(text.slice(index, index + chunkSize));
@@ -215,6 +320,15 @@ async function applyPatch(req, res) {
   }
 
   const merged = mergePatchIntoState(currentState, patch);
+  const regularSlotConflict = validatePatchedStudentRegularSlots(merged, patch, currentState);
+  if (regularSlotConflict) {
+    return sendJson(res, 409, {
+      ok: false,
+      error: regularSlotConflict.error || "Teacher regular slot conflict.",
+      conflict: regularSlotConflict,
+      currentVersion
+    });
+  }
   const expectedVersion = currentVersion;
   const chunks = splitText(JSON.stringify(merged));
   const publishedChunks = JSON.stringify(chunks.map((chunk, index) => ({

@@ -769,6 +769,138 @@ function testActiveDirectBookingBeatsCancelledHistoricalBookingAtSameCell() {
   assert.equal(resolved && resolved.bookingId, "booked_student_b_direct");
 }
 
+function testPublicHolidayOverridesRegularAndOpenButPreservesSpecials() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "slot_regular_monday_1800",
+      day: "Monday",
+      time: "18:00",
+      locked: true,
+      studentId: "student_regular",
+      studentName: "Regular Student",
+      subject: "CN",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }, {
+      id: "slot_open_monday_1830",
+      day: "Monday",
+      time: "18:30",
+      locked: false,
+      subject: "CN",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    publicHolidays: [{
+      id: "holiday_public",
+      date: "2026-07-13",
+      startDate: "2026-07-13",
+      endDate: "2026-07-13",
+      name: "Public Holiday",
+      status: "active",
+      teachingAsUsualTeacherIds: [],
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    }],
+    bookings: [{
+      id: "booking_exam_on_holiday",
+      teacherId: "teacher_peggy",
+      date: "2026-07-13",
+      time: "19:00",
+      studentId: "student_exam",
+      studentName: "Exam Student",
+      subject: "CN",
+      type: "exam",
+      status: "booked",
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    }]
+  }, "2026-07-13", "2026-07-20");
+
+  assertParityCell(cell(cells, "2026-07-13", "18:00"), {
+    bookingId: "",
+    recurringScheduleId: "slot_regular_monday_1800",
+    studentId: "student_regular",
+    studentName: "Regular Student",
+    subject: "CN",
+    type: "regular class",
+    status: "public_holiday",
+    available: false,
+    locked: true,
+    remark: "Public Holiday",
+    minutes: 25
+  }, "public holiday regular class");
+  assertParityCell(cell(cells, "2026-07-13", "18:30"), {
+    bookingId: "",
+    recurringScheduleId: "slot_open_monday_1830",
+    studentId: "",
+    studentName: "",
+    subject: "CN",
+    type: "public holiday",
+    status: "public_holiday",
+    available: false,
+    locked: true,
+    remark: "Public Holiday",
+    minutes: 25
+  }, "public holiday open slot");
+  assertParityCell(cell(cells, "2026-07-13", "19:00"), {
+    bookingId: "booking_exam_on_holiday",
+    recurringScheduleId: "",
+    studentId: "student_exam",
+    studentName: "Exam Student",
+    subject: "CN",
+    type: "exam",
+    status: "booked",
+    available: false,
+    locked: true,
+    remark: "",
+    minutes: 25
+  }, "public holiday preserves exam");
+  assert.equal(cell(cells, "2026-07-20", "18:00")?.status, "booked");
+  assert.equal(cell(cells, "2026-07-20", "18:30")?.status, "available");
+}
+
+function testPublicHolidayTeachingAsUsualTeacherIsExempt() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "slot_regular_monday_1800",
+      day: "Monday",
+      time: "18:00",
+      locked: true,
+      studentId: "student_regular",
+      studentName: "Regular Student",
+      subject: "CN",
+      startDate: "2026-07-01"
+    }, {
+      id: "slot_open_monday_1830",
+      day: "Monday",
+      time: "18:30",
+      locked: false,
+      subject: "CN",
+      startDate: "2026-07-01"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    publicHolidays: [{
+      id: "holiday_public",
+      date: "2026-07-13",
+      startDate: "2026-07-13",
+      endDate: "2026-07-13",
+      name: "Public Holiday",
+      status: "active",
+      teachingAsUsualTeacherIds: ["teacher_peggy"],
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    }],
+    bookings: []
+  }, "2026-07-13", "2026-07-13");
+
+  assert.equal(cell(cells, "2026-07-13", "18:00")?.status, "booked");
+  assert.equal(cell(cells, "2026-07-13", "18:30")?.status, "available");
+}
+
 testRecurringStartEnd();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
@@ -782,5 +914,7 @@ testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate();
 testMovedSourceAndDestinationKeepSeparateOccurrenceIds();
 testActiveRegularSlotBeatsCancelledHistoricalBookingAtSameCell();
 testActiveDirectBookingBeatsCancelledHistoricalBookingAtSameCell();
+testPublicHolidayOverridesRegularAndOpenButPreservesSpecials();
+testPublicHolidayTeachingAsUsualTeacherIsExempt();
 
 console.log("calendar-resolver stability tests passed");
