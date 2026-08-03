@@ -815,6 +815,18 @@ function testPublicHolidayOverridesRegularAndOpenButPreservesSpecials() {
       type: "exam",
       status: "booked",
       updatedAt: "2026-07-10T00:00:00.000Z"
+    }, {
+      id: "booking_completed_regular_on_holiday",
+      teacherId: "teacher_peggy",
+      date: "2026-07-13",
+      time: "20:00",
+      studentId: "student_completed",
+      studentName: "Completed Regular Student",
+      subject: "CN",
+      type: "regular class",
+      status: "completed",
+      updatedAt: "2026-07-13T12:00:00.000Z",
+      completedAt: "2026-07-13T12:00:00.000Z"
     }]
   }, "2026-07-13", "2026-07-20");
 
@@ -857,6 +869,19 @@ function testPublicHolidayOverridesRegularAndOpenButPreservesSpecials() {
     remark: "",
     minutes: 25
   }, "public holiday preserves exam");
+  assertParityCell(cell(cells, "2026-07-13", "20:00"), {
+    bookingId: "booking_completed_regular_on_holiday",
+    recurringScheduleId: "",
+    studentId: "student_completed",
+    studentName: "Completed Regular Student",
+    subject: "CN",
+    type: "regular class",
+    status: "public_holiday",
+    available: false,
+    locked: true,
+    remark: "Public Holiday",
+    minutes: 25
+  }, "public holiday overrides completed regular class");
   assert.equal(cell(cells, "2026-07-20", "18:00")?.status, "booked");
   assert.equal(cell(cells, "2026-07-20", "18:30")?.status, "available");
 }
