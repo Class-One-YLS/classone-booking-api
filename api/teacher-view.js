@@ -260,25 +260,46 @@ function teacherCategoryLabel(teacher) {
 }
 
 function slotDateTime(dateISO, time) {
-  const [year, month, day] = String(dateISO || "").split("-").map(Number);
+  const [year, month, day] = dateOnly(dateISO).split("-").map(Number);
   const [hour, minute] = normalizeTime(time).split(":").map(Number);
-  return new Date(year || 1970, (month || 1) - 1, day || 1, hour || 0, minute || 0);
+  if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return new Date(NaN);
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
 }
 
-function slotHasPassed(dateISO, time, reference = new Date()) {
-  const dt = slotDateTime(dateISO, time);
-  return !Number.isNaN(dt.getTime()) && dt < reference;
+function classDurationMinutes(record = {}) {
+  const value = Number(record.minutes || record.duration || record.classMinutes || 25);
+  return Number.isFinite(value) && value > 0 ? value : 25;
+}
+
+function slotEndDateTime(record = {}) {
+  const start = slotDateTime(record.date, record.time);
+  if (Number.isNaN(start.getTime())) return start;
+  return new Date(start.getTime() + classDurationMinutes(record) * 60 * 1000);
+}
+
+function slotHasPassed(dateISO, time, reference = new Date(), record = {}) {
+  const end = slotEndDateTime({ ...record, date: dateISO, time });
+  return !Number.isNaN(end.getTime()) && end <= reference;
 }
 
 function incomeStatusForCell(cell, reference = new Date()) {
   const status = cell?.status || "booked";
-  return status === "booked" && slotHasPassed(cell.date, cell.time, reference) ? "completed" : status;
+  if (status !== "booked" && status !== "completed") return status;
+  const start = slotDateTime(cell?.date, cell?.time);
+  if (Number.isNaN(start.getTime()) || start > reference) return "booked";
+  if (status === "completed") return "completed";
+  return slotHasPassed(cell?.date, cell?.time, reference, cell) ? "completed" : "booked";
 }
 
 function isPaidCompletedCell(cell, reference = new Date()) {
   const type = String(cell?.type || "").toLowerCase();
   const status = cell?.status || "";
-  return status === "completed" && type !== "practical class" && type !== "cancelled";
+  const start = slotDateTime(cell?.date, cell?.time);
+  return status === "completed"
+    && !Number.isNaN(start.getTime())
+    && start <= reference
+    && type !== "practical class"
+    && type !== "cancelled";
 }
 
 function isNoShowCell(cell) {
