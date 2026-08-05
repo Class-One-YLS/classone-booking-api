@@ -9,7 +9,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.08.05-teacher-leave-summary.1";
+const API_BUILD = "2026.08.05-teacher-leave-summary.2";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -21,6 +21,10 @@ function cleanTeacherName(value) {
 
 function cleanStudentName(value) {
   return String(value || "").replace(/\s*\((?:BC|CN|BM|PK|SOK|PHONICS|CREATIVE MATHS)\)\s*$/ig, "").replace(/\s+/g, " ").trim();
+}
+
+function isTruthyFlag(value) {
+  return value === true || ["true", "1", "yes"].includes(String(value || "").trim().toLowerCase());
 }
 
 function slug(value) {
@@ -1054,7 +1058,7 @@ async function loadState(req, from, to) {
         select jsonb_agg(leave.value)
         from jsonb_array_elements(coalesce(source.data->'teacherLeaves', '[]'::jsonb)) as leave(value)
         where leave.value->>'teacherId' = teacher_match.teacher->>'id'
-          and lower(coalesce(leave.value->>'status', 'active')) not in ('deleted', 'removed', 'archived', 'cancelled', 'canceled', 'withdrawn', 'inactive', 'superseded', 'undone')
+          and lower(coalesce(leave.value->>'status', 'active')) not in ('deleted', 'removed', 'cancelled', 'canceled', 'withdrawn', 'inactive', 'superseded', 'undone')
           and lower(coalesce(leave.value->>'deleted', 'false')) not in ('true', '1', 'yes')
           and (
             ${from} = ''
@@ -1185,8 +1189,8 @@ module.exports = async function handler(req, res) {
         endTime: normalizeTime(leave.endTime || leave.toTime || ""),
         wholeDay: Boolean(leave.wholeDay),
         status: leave.status || "active",
-        archived: Boolean(leave.archived),
-        deleted: Boolean(leave.deleted),
+        archived: isTruthyFlag(leave.archived),
+        deleted: isTruthyFlag(leave.deleted),
         reason: leave.reason || "",
         remark: leave.remark || "",
         createdAt: leave.createdAt || "",
