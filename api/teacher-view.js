@@ -9,7 +9,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.08.03-public-holiday-resolver.1";
+const API_BUILD = "2026.08.05-teacher-leave-summary.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -713,6 +713,7 @@ function publicCellFromBooking(booking, teacher, state) {
     rebookedAt: booking.rebookedAt || "",
     cancelledAt: booking.cancelledAt || "",
     completedAt: booking.completedAt || "",
+    finalizedAt: booking.finalizedAt || "",
     studentNotShowAt: booking.studentNotShowAt || "",
     createdAt: booking.createdAt || booking.created_at || "",
     resolvedAt: new Date().toISOString(),
@@ -911,6 +912,7 @@ function publicBooking(booking, teacher, state) {
     rebookedAt: booking.rebookedAt || "",
     cancelledAt: booking.cancelledAt || "",
     completedAt: booking.completedAt || "",
+    finalizedAt: booking.finalizedAt || "",
     studentNotShowAt: booking.studentNotShowAt || "",
     createdAt: booking.createdAt || booking.created_at || "",
     estimatedPay: status === "student_not_show" ? notShowAllowance(state, dateOnly(booking.date)) : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
@@ -1052,7 +1054,7 @@ async function loadState(req, from, to) {
         select jsonb_agg(leave.value)
         from jsonb_array_elements(coalesce(source.data->'teacherLeaves', '[]'::jsonb)) as leave(value)
         where leave.value->>'teacherId' = teacher_match.teacher->>'id'
-          and lower(coalesce(leave.value->>'status', 'active')) not in ('deleted', 'removed', 'archived', 'cancelled', 'canceled')
+          and lower(coalesce(leave.value->>'status', 'active')) not in ('deleted', 'removed', 'archived', 'cancelled', 'canceled', 'withdrawn', 'inactive', 'superseded', 'undone')
           and lower(coalesce(leave.value->>'deleted', 'false')) not in ('true', '1', 'yes')
           and (
             ${from} = ''
@@ -1147,6 +1149,7 @@ module.exports = async function handler(req, res) {
         rebookedAt: cell.rebookedAt || "",
         cancelledAt: cell.cancelledAt || "",
         completedAt: cell.completedAt || "",
+        finalizedAt: cell.finalizedAt || "",
         studentNotShowAt: cell.studentNotShowAt || "",
         createdAt: cell.createdAt || "",
         estimatedPay: Number(cell.estimatedPay || 0)
@@ -1170,6 +1173,25 @@ module.exports = async function handler(req, res) {
       incomeSummary,
       regularSlots: (teacher.regularSlots || []).map(slot => publicSlot(slot, teacher, state)),
       overrideSlots: (teacher.overrideSlots || []).map(slot => publicSlot(slot, teacher, state)),
+      teacherLeaves: (state.teacherLeaves || []).map(leave => ({
+        id: leave.id || "",
+        teacherId: leave.teacherId || teacher.id,
+        date: dateOnly(leave.date || leave.startDate || ""),
+        startDate: dateOnly(leave.startDate || leave.date || ""),
+        endDate: dateOnly(leave.endDate || leave.date || leave.startDate || ""),
+        fromTime: normalizeTime(leave.fromTime || leave.startTime || ""),
+        toTime: normalizeTime(leave.toTime || leave.endTime || ""),
+        startTime: normalizeTime(leave.startTime || leave.fromTime || ""),
+        endTime: normalizeTime(leave.endTime || leave.toTime || ""),
+        wholeDay: Boolean(leave.wholeDay),
+        status: leave.status || "active",
+        archived: Boolean(leave.archived),
+        deleted: Boolean(leave.deleted),
+        reason: leave.reason || "",
+        remark: leave.remark || "",
+        createdAt: leave.createdAt || "",
+        updatedAt: leave.updatedAt || leave.createdAt || ""
+      })),
       bookings,
       cells,
       students: activeTeacherStudents(teacher, state),
