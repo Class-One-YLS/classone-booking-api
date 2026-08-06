@@ -9,7 +9,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.08.05-teacher-leave-summary.2";
+const API_BUILD = "2026.08.06-completed-summary.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
