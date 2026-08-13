@@ -9,7 +9,7 @@ const {
 const calendarResolver = require("../lib/calendar-resolver");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const API_BUILD = "2026.08.06-public-holiday-open-off.1";
+const API_BUILD = "2026.08.07-teacher-completed-summary.1";
 
 function stateKey(req) {
   return String((req.query && req.query.key) || "production").trim() || "production";
@@ -268,31 +268,6 @@ function slotDateTime(dateISO, time) {
   const [hour, minute] = normalizeTime(time).split(":").map(Number);
   if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return new Date(NaN);
   return new Date(year, month - 1, day, hour, minute, 0, 0);
-}
-
-function classDurationMinutes(record = {}) {
-  const value = Number(record.minutes || record.duration || record.classMinutes || 25);
-  return Number.isFinite(value) && value > 0 ? value : 25;
-}
-
-function slotEndDateTime(record = {}) {
-  const start = slotDateTime(record.date, record.time);
-  if (Number.isNaN(start.getTime())) return start;
-  return new Date(start.getTime() + classDurationMinutes(record) * 60 * 1000);
-}
-
-function slotHasPassed(dateISO, time, reference = new Date(), record = {}) {
-  const end = slotEndDateTime({ ...record, date: dateISO, time });
-  return !Number.isNaN(end.getTime()) && end <= reference;
-}
-
-function incomeStatusForCell(cell, reference = new Date()) {
-  const status = cell?.status || "booked";
-  if (status !== "booked" && status !== "completed") return status;
-  const start = slotDateTime(cell?.date, cell?.time);
-  if (Number.isNaN(start.getTime()) || start > reference) return "booked";
-  if (status === "completed") return "completed";
-  return slotHasPassed(cell?.date, cell?.time, reference, cell) ? "completed" : "booked";
 }
 
 function isPaidCompletedCell(cell, reference = new Date()) {

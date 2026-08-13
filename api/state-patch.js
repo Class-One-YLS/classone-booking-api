@@ -416,6 +416,17 @@ module.exports = async function handler(req, res) {
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
     return await applyPatch(req, res);
   } catch (error) {
+    const message = safeError(error);
+    if (Number(error?.status || 0) === 413 || /request body is too large|request is too large|body exceeded/i.test(message)) {
+      return sendJson(res, 413, {
+        ok: false,
+        code: "PATCH_PAYLOAD_TOO_LARGE",
+        error: "Record patch payload is too large.",
+        payloadBytes: Number(error?.payloadBytes || 0) || null,
+        maxBytes: Number(error?.maxBytes || 0) || 67108864,
+        retryable: false
+      });
+    }
     return sendJson(res, 500, { ok: false, error: safeError(error) });
   }
 };
