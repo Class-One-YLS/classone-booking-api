@@ -1,0 +1,134 @@
+const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
+const path = require("path");
+
+const originalLoad = Module._load;
+Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === "@neondatabase/serverless") {
+    return {
+      Pool: class MockPool {},
+      neon: () => {
+        throw new Error("Neon client should not be used by phase2 architecture unit tests.");
+      }
+    };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
+
+const {
+  normalizeRecurringAssignment,
+  overlayRecurringAssignments,
+  recurringAssignmentId
+} = require("../lib/composed-state");
+
+const repoRoot = path.resolve(__dirname, "..", "..");
+const frontend = fs.readFileSync(path.join(repoRoot, "outputs", "index.html"), "utf8");
+
+function functionBlock(source, name, nextName) {
+  const marker = `async function ${name}`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `${name} must exist`);
+  if (nextName) {
+    const endMarker = `async function ${nextName}`;
+    const end = source.indexOf(endMarker, start + marker.length);
+    assert.notEqual(end, -1, `${nextName} must exist after ${name}`);
+    return source.slice(start, end);
+  }
+  const end = source.indexOf("\n    function ", start + marker.length);
+  return end > start ? source.slice(start, end) : source.slice(start);
+}
+
+function testRecurringAssignmentIdentityAllowsSameTeacherSameTimeDifferentDays() {
+  const teacher = { id: "teacher_so_jing_wen" };
+  const tuesday = {
+    teacherId: teacher.id,
+    studentId: "student_lucas",
+    studentName: "Lucas Tzia",
+    day: "Tuesday",
+    time: "20:00",
+    startDate: "2026-08-18"
+  };
+  const thursday = {
+    teacherId: teacher.id,
+    studentId: "student_other",
+    studentName: "Another Student",
+    day: "Thursday",
+    time: "20:00",
+    startDate: "2026-08-20"
+  };
+  assert.notEqual(
+    recurringAssignmentId(tuesday, teacher, "regularSlots"),
+    recurringAssignmentId(thursday, teacher, "regularSlots"),
+    "recurring assignment identity must not be teacherId/time only"
+  );
+}
+
+function testOverlayRecurringAssignmentsIsRecordLevel() {
+  const state = {
+    teachers: [{
+      id: "teacher_so_jing_wen",
+      regularSlots: [{
+        id: "legacy_thursday",
+        day: "Thursday",
+        time: "20:00",
+        studentId: "student_other",
+        studentName: "Another Student",
+        subject: "CN",
+        locked: true,
+        startDate: "2026-08-20"
+      }]
+    }],
+    students: [{
+      id: "student_lucas",
+      regularSlots: []
+    }]
+  };
+  const assignment = normalizeRecurringAssignment({
+    id: "normalized_tuesday",
+    assignmentId: "normalized_tuesday",
+    teacherId: "teacher_so_jing_wen",
+    studentId: "student_lucas",
+    studentName: "Lucas Tzia",
+    day: "Tuesday",
+    time: "20:00",
+    subject: "CN",
+    sourceCollection: "regularSlots",
+    sourceSlotId: "normalized_tuesday",
+    startDate: "2026-08-18"
+  });
+  overlayRecurringAssignments(state, [assignment]);
+  const slots = state.teachers[0].regularSlots;
+  assert(slots.some(slot => slot.day === "Tuesday" && slot.studentName === "Lucas Tzia"), "normalized Tuesday assignment should be added");
+  assert(slots.some(slot => slot.day === "Thursday" && slot.studentName === "Another Student"), "legacy unrelated Thursday assignment should remain");
+}
+
+function testDeltaSuccessPathsDoNotCallLegacySave() {
+  [
+    ["syncBookingOutcomeDelta", "syncBookingOutcomeDeltas"],
+    ["syncBookingCreateDelta", "syncBookingCreateDeltas"],
+    ["syncRecurringAssignmentDelta", "fetchNeonManifest"]
+  ].forEach(([name, nextName]) => {
+    const body = functionBlock(frontend, name, nextName);
+    assert(!/\bsave\s*\(/.test(body), `${name} must not call save() after normalized endpoint success`);
+    assert(!/\bautoPushIfConfigured\s*\(/.test(body), `${name} must not queue legacy state sync`);
+    assert(!/\benqueueNeonPush\s*\(/.test(body), `${name} must not queue /api/state-patch`);
+    assert(/\bpersistState\s*\(/.test(body), `${name} should still persist browser-local state`);
+  });
+}
+
+function testMigratedEndpointConstantsAreEnabled() {
+  assert(frontend.includes("const ENABLE_BOOKING_OUTCOME_DELTA_SYNC = true;"));
+  assert(frontend.includes("const ENABLE_BOOKING_CREATE_DELTA_SYNC = true;"));
+  assert(frontend.includes("const ENABLE_RECURRING_ASSIGNMENT_DELTA_SYNC = true;"));
+  assert(frontend.includes('"/api/bookings/outcome"'));
+  assert(frontend.includes('"/api/bookings/create"'));
+  assert(frontend.includes('"/api/recurring-assignments/upsert"'));
+}
+
+testRecurringAssignmentIdentityAllowsSameTeacherSameTimeDifferentDays();
+testOverlayRecurringAssignmentsIsRecordLevel();
+testDeltaSuccessPathsDoNotCallLegacySave();
+testMigratedEndpointConstantsAreEnabled();
+
+console.log("phase2 architecture tests passed");

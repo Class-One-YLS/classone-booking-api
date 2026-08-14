@@ -12,7 +12,15 @@ module.exports = async function handler(req, res) {
   const result = {
     ok: true,
     service: "classone-booking-api",
-    release: "teacher-view-sync-2026-07-09",
+    release: "2026.08.14-phase2-verification.1",
+    capabilities: {
+      phase1BookingOutcome: true,
+      phase2BookingCreate: true,
+      phase2RecurringAssignments: true,
+      composedState: true,
+      recurringBackfillStatus: true,
+      bookingBackfillStatus: true
+    },
     databaseConfigured: Boolean(process.env.DATABASE_URL),
     time: new Date().toISOString()
   };

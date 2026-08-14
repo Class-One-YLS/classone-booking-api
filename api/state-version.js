@@ -16,7 +16,26 @@ module.exports = async function handler(req, res) {
     await ensureCoreTables();
     const key = stateKey(req);
     const row = await loadComposedState(key, { backfill: false });
-    if (!row.data) return sendJson(res, 200, { ok: true, key, empty: true, version: 0, updatedAt: null, updatedBy: null });
+    const phase2Status = {
+      build: "2026.08.14-phase2-verification.1",
+      capabilities: {
+        phase1BookingOutcome: true,
+        phase2BookingCreate: true,
+        phase2RecurringAssignments: true,
+        composedState: true,
+        recurringBackfillStatus: true,
+        bookingBackfillStatus: true
+      },
+      endpoints: {
+        bookingOutcome: "/api/bookings/outcome",
+        bookingCreate: "/api/bookings/create",
+        recurringAssignmentUpsert: "/api/recurring-assignments/upsert",
+        recurringAssignmentBackfill: "/api/recurring-assignments/backfill",
+        bookingBackfill: "/api/bookings/backfill",
+        teacherView: "/api/teacher-view"
+      }
+    };
+    if (!row.data) return sendJson(res, 200, { ok: true, key, empty: true, version: 0, updatedAt: null, updatedBy: null, composed: true, ...phase2Status });
     return sendJson(res, 200, {
       ok: true,
       key: row.key,
@@ -24,7 +43,8 @@ module.exports = async function handler(req, res) {
       version: Number(row.version || 0),
       updatedAt: row.updatedAt,
       updatedBy: row.updatedBy || null,
-      composed: true
+      composed: true,
+      ...phase2Status
     });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });
