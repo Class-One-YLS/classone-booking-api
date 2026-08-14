@@ -141,6 +141,59 @@ function testRepeatedCancellationChoosesOneCanonicalLatestOutcome() {
   assert.equal(cell.bookingId, "outcome_elyisa_cancelled_new");
 }
 
+function upsertLocalRecord(state, collectionName, record) {
+  state[collectionName] ||= [];
+  const index = state[collectionName].findIndex(item => item.id === record.id);
+  if (index >= 0) state[collectionName][index] = { ...state[collectionName][index], ...record };
+  else state[collectionName].unshift(record);
+}
+
+function testReadAfterWriteCancelledResponseSuppressesRecurringClass() {
+  const state = baseState();
+  const responseBooking = outcomeBooking("cancelled", {
+    id: "booking_delta_response_elyisa",
+    // Production can contain older teacher-slot ids while the recurring candidate
+    // uses the normalized assignment id. Alias matching must bridge both.
+    sourceSlotId: "legacy_slot_catherine_friday_1430",
+    recurringSourceSlotId: "",
+    updatedAt: "2026-08-14T07:00:00.000Z"
+  });
+  delete responseBooking.normalizedRecurringAssignmentId;
+  delete responseBooking.assignmentId;
+  delete responseBooking.recurringAssignmentId;
+  responseBooking.recurringSourceSlotId = "";
+  responseBooking.occurrenceKey = "legacy_slot_catherine_friday_1430|2026-08-14";
+  responseBooking.occurrenceId = `occurrence:${responseBooking.occurrenceKey}`;
+  upsertLocalRecord(state, "bookings", responseBooking);
+  const cancelled = resolvedCell(state, "2026-08-14");
+  const nextWeek = resolvedCell(state, "2026-08-21");
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.bookingId, "booking_delta_response_elyisa");
+  assert.equal(nextWeek.status, "booked");
+  assert.equal(nextWeek.bookingId, "");
+}
+
+function testReadAfterWriteResponseWithOnlyOccurrenceKeySuppressesRecurringClass() {
+  const state = baseState();
+  const responseBooking = outcomeBooking("cancelled", {
+    id: "booking_delta_occurrence_key_only",
+    sourceSlotId: "",
+    recurringSourceSlotId: "",
+    updatedAt: "2026-08-14T07:30:00.000Z"
+  });
+  delete responseBooking.normalizedRecurringAssignmentId;
+  delete responseBooking.assignmentId;
+  delete responseBooking.recurringAssignmentId;
+  delete responseBooking.sourceSlotId;
+  delete responseBooking.recurringSourceSlotId;
+  responseBooking.occurrenceKey = "assignment_catherine_elyisa_friday_1430|2026-08-14";
+  responseBooking.occurrenceId = `occurrence:${responseBooking.occurrenceKey}`;
+  upsertLocalRecord(state, "bookings", responseBooking);
+  const cancelled = resolvedCell(state, "2026-08-14");
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.bookingId, "booking_delta_occurrence_key_only");
+}
+
 testBaseRecurringClassOnly();
 testCanonicalOccurrenceIdentityUsesNormalizedAssignmentAlias();
 testExactCancelledOutcomeSuppressesVirtualRecurringClass();
@@ -149,5 +202,7 @@ testExactNotShowOutcomeSuppressesVirtualRecurringClass();
 testCancelledDateOnlyDoesNotEndRecurringAssignment();
 testRestoreBookedOutcomeReturnsClassForExactDate();
 testRepeatedCancellationChoosesOneCanonicalLatestOutcome();
+testReadAfterWriteCancelledResponseSuppressesRecurringClass();
+testReadAfterWriteResponseWithOnlyOccurrenceKeySuppressesRecurringClass();
 
 console.log("recurring outcome override tests passed");

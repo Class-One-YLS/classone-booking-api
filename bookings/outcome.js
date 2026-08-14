@@ -52,6 +52,74 @@ function canonicalBookingId(booking, body) {
   return String(body.bookingId || booking.id || booking.bookingId || "").trim();
 }
 
+function occurrenceKeyFromParts(sourceSlotId, date) {
+  const source = String(sourceSlotId || "").trim();
+  const dateStr = dateOnly(date);
+  return source && dateStr ? `${source}|${dateStr}` : "";
+}
+
+function recurringSourceFromOccurrenceKey(record) {
+  const values = [
+    record && record.sourceOccurrenceKey,
+    record && record.occurrenceKey,
+    String(record && record.sourceOccurrenceId || "").startsWith("occurrence:") ? String(record.sourceOccurrenceId).slice("occurrence:".length) : "",
+    String(record && record.occurrenceId || "").startsWith("occurrence:") ? String(record.occurrenceId).slice("occurrence:".length) : ""
+  ];
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text || !text.includes("|")) continue;
+    const [source, date] = text.split("|");
+    if (source && dateOnly(date)) return source;
+  }
+  return "";
+}
+
+function recurringSourceSlotId(record) {
+  return record && (
+    record.normalizedRecurringAssignmentId ||
+    record.assignmentId ||
+    record.recurringAssignmentId ||
+    record.recurringSourceSlotId ||
+    record.sourceSlotId ||
+    record.recurringScheduleId ||
+    record.movedFromRecurringClassId ||
+    recurringSourceFromOccurrenceKey(record)
+  ) || "";
+}
+
+function normalizeOutcomeBookingRecord(record, outcome, now) {
+  const booking = { ...(record || {}) };
+  const finalStatus = outcome === "restore" ? "booked" : (cleanOutcome(outcome) || cleanOutcome(booking.status || booking.outcome));
+  const sourceSlotId = recurringSourceSlotId(booking);
+  const date = dateOnly(booking.date || booking.occurrenceDate);
+  booking.status = finalStatus;
+  booking.outcome = finalStatus;
+  booking.classOutcome = finalStatus;
+  booking.updatedAt = booking.updatedAt || now;
+  booking.statusChangedAt = booking.statusChangedAt || now;
+  booking.slotRevisionAt = booking.slotRevisionAt || booking.statusChangedAt || booking.updatedAt || now;
+  if (sourceSlotId && date) {
+    booking.recurringSourceSlotId = sourceSlotId;
+    booking.occurrenceDate = date;
+    booking.occurrenceKey = booking.occurrenceKey || occurrenceKeyFromParts(sourceSlotId, date);
+    booking.sourceOccurrenceKey = booking.sourceOccurrenceKey || booking.occurrenceKey;
+    booking.occurrenceId = booking.occurrenceId || `occurrence:${booking.occurrenceKey}`;
+    booking.suppressRecurringOccurrence = true;
+    booking.resolutionActive = true;
+    booking.resolutionStatus = finalStatus;
+  }
+  if (finalStatus === "cancelled") booking.cancelledAt = booking.cancelledAt || now;
+  if (finalStatus === "student_not_show") booking.studentNotShowAt = booking.studentNotShowAt || now;
+  if (finalStatus === "completed") {
+    booking.completedAt = booking.completedAt || now;
+    booking.finalizedAt = booking.finalizedAt || now;
+  }
+  booking.archived = false;
+  booking.deleted = false;
+  booking.active = booking.active !== false;
+  return booking;
+}
+
 function rowDataVersion(row) {
   return Number(row && (row.record_version || row.recordVersion) || 0);
 }
@@ -145,7 +213,7 @@ async function handleOutcome(req, res) {
 
     const nextVersion = currentVersion + 1;
     const now = new Date().toISOString();
-    const savedBooking = {
+    const savedBooking = normalizeOutcomeBookingRecord({
       ...current.rows[0].data,
       ...booking,
       id: bookingId,
@@ -155,7 +223,7 @@ async function handleOutcome(req, res) {
       outcome: outcome === "restore" ? "booked" : booking.outcome || outcome,
       classOutcome: outcome === "restore" ? "booked" : booking.classOutcome || outcome,
       updatedAt: booking.updatedAt || now
-    };
+    }, outcome, now);
 
     await client.query(
       `update booking_records_v2
