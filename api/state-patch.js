@@ -6,6 +6,7 @@ const BUSINESS_COLLECTIONS = [
   "teachers",
   "students",
   "bookings",
+  "recurringAssignments",
   "leads",
   "tutorLeads",
   "crmHistoricalMonthlyStats",
