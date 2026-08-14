@@ -1,4 +1,5 @@
-const { getSql, ensureCoreTables } = require("../lib/db");
+const { ensureCoreTables } = require("../lib/db");
+const { loadComposedState } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, safeError } = require("../lib/http");
 
 function stateKey(req) {
@@ -13,23 +14,17 @@ module.exports = async function handler(req, res) {
   try {
     if (req.method !== "GET") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
     await ensureCoreTables();
-    const sql = getSql();
     const key = stateKey(req);
-    const rows = await sql`
-      select key, version, updated_at, updated_by
-      from app_state
-      where key = ${key}
-      limit 1
-    `;
-    if (!rows.length) return sendJson(res, 200, { ok: true, key, empty: true, version: 0, updatedAt: null, updatedBy: null });
-    const row = rows[0];
+    const row = await loadComposedState(key, { backfill: false });
+    if (!row.data) return sendJson(res, 200, { ok: true, key, empty: true, version: 0, updatedAt: null, updatedBy: null });
     return sendJson(res, 200, {
       ok: true,
       key: row.key,
       empty: false,
       version: Number(row.version || 0),
-      updatedAt: row.updated_at,
-      updatedBy: row.updated_by || null
+      updatedAt: row.updatedAt,
+      updatedBy: row.updatedBy || null,
+      composed: true
     });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });

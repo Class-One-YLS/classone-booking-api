@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { getSql, ensureCoreTables } = require("../lib/db");
+const { loadComposedState } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../lib/http");
 
 function stateKey(req, body) {
@@ -82,25 +83,19 @@ async function requireWritePermission(req, res, key, incomingData = null, authBo
 
 async function loadState(req, res) {
   await ensureCoreTables();
-  const sql = getSql();
   const key = stateKey(req);
-  const rows = await sql`
-    select key, data, version, updated_at, updated_by
-    from app_state
-    where key = ${key}
-    limit 1
-  `;
-  if (!rows.length) {
+  const row = await loadComposedState(key);
+  if (!row.data) {
     return sendJson(res, 200, { ok: true, key, data: null, version: 0, updatedAt: null, updatedBy: null });
   }
-  const row = rows[0];
   return sendJson(res, 200, {
     ok: true,
     key: row.key,
     data: row.data,
     version: Number(row.version || 0),
-    updatedAt: row.updated_at,
-    updatedBy: row.updated_by || null
+    updatedAt: row.updatedAt,
+    updatedBy: row.updatedBy || null,
+    composed: true
   });
 }
 

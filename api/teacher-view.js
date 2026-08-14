@@ -1,4 +1,5 @@
 const { getSql, ensureCoreTables } = require("../lib/db");
+const { loadComposedState } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, safeError } = require("../lib/http");
 const {
   bookingAmendmentTime,
@@ -922,146 +923,62 @@ function hasTeacherToken(req, teacher) {
 
 async function loadState(req, from, to) {
   await ensureCoreTables();
-  const sql = getSql();
   const key = stateKey(req);
   const rawTeacher = String((req.query && (req.query.teacherId || req.query.teacher)) || "").trim();
-  const compactTeacher = slug(rawTeacher).replace(/-/g, "");
-  const rows = await sql`
-    with source as (
-      select key, data, version, updated_at, updated_by
-      from app_state
-      where key = ${key}
-      limit 1
-    ), teacher_match as (
-      select teacher.value as teacher
-      from source
-      cross join lateral jsonb_array_elements(coalesce(source.data->'teachers', '[]'::jsonb)) as teacher(value)
-      where teacher.value->>'id' = ${rawTeacher}
-         or lower(coalesce(teacher.value->>'name', '')) = lower(${rawTeacher})
-         or regexp_replace(lower(coalesce(teacher.value->>'name', '')), '[^a-z0-9]+', '', 'g') = ${compactTeacher}
-      order by case
-        when teacher.value->>'id' = ${rawTeacher} then 0
-        when lower(coalesce(teacher.value->>'name', '')) = lower(${rawTeacher}) then 1
-        else 2
-      end
-      limit 1
-    )
-    select
-      source.key,
-      source.version,
-      source.updated_at,
-      source.updated_by,
-      case
-        when left(coalesce(teacher_match.teacher->>'photo', ''), 5) = 'data:' then teacher_match.teacher - 'photo'
-        else teacher_match.teacher
-      end as teacher,
-      coalesce((
-        select jsonb_agg(booking.value)
-          from jsonb_array_elements(coalesce(source.data->'bookings', '[]'::jsonb)) as booking(value)
-          where (booking.value->>'teacherId' = teacher_match.teacher->>'id'
-            or (booking.value->>'source' = 'fixed_regular_snapshot' and booking.value->>'id' like ('history_' || (teacher_match.teacher->>'id') || '_%')))
-          and (
-            coalesce(booking.value->>'status', '') <> 'deleted'
-            or lower(coalesce(
-              booking.value->>'outcome',
-              booking.value->>'finalStatus',
-              booking.value->>'classOutcome',
-              booking.value->>'outcomeStatus',
-              booking.value->>'businessStatus',
-              ''
-            )) in ('cancel', 'cancelled', 'canceled')
-          )
-          and (
-            booking.value->>'source' = 'fixed_regular_snapshot'
-            or (${from} = '' or left(coalesce(booking.value->>'date', ''), 10) >= ${from})
-          )
-          and (
-            booking.value->>'source' = 'fixed_regular_snapshot'
-            or (${to} = '' or left(coalesce(booking.value->>'date', ''), 10) <= ${to})
-          )
-      ), '[]'::jsonb) as bookings,
-      coalesce((
-        select jsonb_agg(
-          case when left(coalesce(student.value->>'photo', ''), 5) = 'data:' then student.value - 'photo' else student.value end
-        )
-        from jsonb_array_elements(coalesce(source.data->'students', '[]'::jsonb)) as student(value)
-        where coalesce(student.value->>'status', '') <> 'archived'
-          and lower(coalesce(student.value->>'archived', 'false')) not in ('true', '1', 'yes')
-          and (
-            exists (
-              select 1
-              from jsonb_array_elements(coalesce(student.value->'regularSlots', '[]'::jsonb)) as student_slot(value)
-              where student_slot.value->>'teacherId' = teacher_match.teacher->>'id'
-            )
-            or exists (
-              select 1
-              from jsonb_array_elements(coalesce(teacher_match.teacher->'regularSlots', '[]'::jsonb)) as teacher_slot(value)
-              where coalesce(teacher_slot.value->>'locked', 'false') = 'true'
-                and lower(coalesce(teacher_slot.value->>'studentName', '')) = lower(coalesce(student.value->>'name', ''))
-            )
-            or exists (
-              select 1
-              from jsonb_array_elements(coalesce(source.data->'bookings', '[]'::jsonb)) as student_booking(value)
-              where student_booking.value->>'teacherId' = teacher_match.teacher->>'id'
-                and (
-                  (coalesce(student_booking.value->>'studentId', '') <> '' and student_booking.value->>'studentId' = student.value->>'id')
-                  or lower(coalesce(student_booking.value->>'studentName', '')) = lower(coalesce(student.value->>'name', ''))
-                )
-            )
-          )
-      ), '[]'::jsonb) as students,
-      coalesce((
-        select jsonb_agg(note.value)
-        from jsonb_array_elements(coalesce(source.data->'teacherStudentNotes', '[]'::jsonb)) as note(value)
-        where note.value->>'teacherId' = teacher_match.teacher->>'id'
-      ), '[]'::jsonb) as teacher_student_notes,
-      coalesce((
-        select jsonb_agg(holiday.value)
-        from jsonb_array_elements(coalesce(source.data->'publicHolidays', '[]'::jsonb)) as holiday(value)
-        where lower(coalesce(holiday.value->>'status', 'active')) not in ('deleted', 'removed', 'archived')
-          and lower(coalesce(holiday.value->>'deleted', 'false')) not in ('true', '1', 'yes')
-          and (
-            ${from} = ''
-            or coalesce(holiday.value->>'endDate', holiday.value->>'date', holiday.value->>'startDate', '') >= ${from}
-          )
-          and (
-            ${to} = ''
-            or coalesce(holiday.value->>'startDate', holiday.value->>'date', '') <= ${to}
-          )
-      ), '[]'::jsonb) as public_holidays,
-      coalesce((
-        select jsonb_agg(leave.value)
-        from jsonb_array_elements(coalesce(source.data->'teacherLeaves', '[]'::jsonb)) as leave(value)
-        where leave.value->>'teacherId' = teacher_match.teacher->>'id'
-          and lower(coalesce(leave.value->>'status', 'active')) not in ('deleted', 'removed', 'cancelled', 'canceled', 'withdrawn', 'inactive', 'superseded', 'undone')
-          and lower(coalesce(leave.value->>'deleted', 'false')) not in ('true', '1', 'yes')
-          and (
-            ${from} = ''
-            or coalesce(leave.value->>'endDate', leave.value->>'date', leave.value->>'startDate', '') >= ${from}
-          )
-          and (
-            ${to} = ''
-            or coalesce(leave.value->>'startDate', leave.value->>'date', '') <= ${to}
-          )
-      ), '[]'::jsonb) as teacher_leaves
-    from source
-    left join teacher_match on true
-  `;
-  if (!rows.length) return null;
-  const row = rows[0];
+  const composed = await loadComposedState(key);
+  const full = composed.data || {};
+  const teachers = Array.isArray(full.teachers) ? full.teachers : [];
+  const teacher = teachers.find(item => item.id === rawTeacher)
+    || teachers.find(item => slug(item.name) === slug(rawTeacher))
+    || teachers.find(item => cleanTeacherName(item.name).toLowerCase() === cleanTeacherName(rawTeacher).toLowerCase())
+    || null;
+  if (!teacher) return null;
+  const safeTeacher = teacher.photo && String(teacher.photo).startsWith("data:") ? { ...teacher, photo: "" } : teacher;
+  const teacherBookings = (Array.isArray(full.bookings) ? full.bookings : []).filter(booking => {
+    const belongs = booking.teacherId === teacher.id
+      || (booking.source === "fixed_regular_snapshot" && String(booking.id || "").startsWith(`history_${teacher.id}_`));
+    if (!belongs) return false;
+    const status = String(booking.status || "");
+    const outcome = String(booking.outcome || booking.finalStatus || booking.classOutcome || booking.outcomeStatus || booking.businessStatus || "").toLowerCase();
+    if (status === "deleted" && !["cancel", "cancelled", "canceled"].includes(outcome)) return false;
+    if (booking.source === "fixed_regular_snapshot") return true;
+    return dateRangeMatches(booking.date, from, to);
+  });
+  const students = (Array.isArray(full.students) ? full.students : []).filter(student => {
+    if (student.status === "archived" || ["true", "1", "yes"].includes(String(student.archived || "false").toLowerCase())) return false;
+    return (student.regularSlots || []).some(slot => slot.teacherId === teacher.id)
+      || (teacher.regularSlots || []).some(slot => String(slot.locked || "false") === "true" && String(slot.studentName || "").toLowerCase() === String(student.name || "").toLowerCase())
+      || teacherBookings.some(booking => (booking.studentId && booking.studentId === student.id) || String(booking.studentName || "").toLowerCase() === String(student.name || "").toLowerCase());
+  }).map(student => student.photo && String(student.photo).startsWith("data:") ? { ...student, photo: "" } : student);
+  const dateIntersects = item => {
+    const end = dateOnly(item.endDate || item.date || item.startDate || "");
+    const start = dateOnly(item.startDate || item.date || "");
+    return (!from || end >= from) && (!to || start <= to);
+  };
   return {
-    key: row.key,
-    version: row.version,
-    updated_at: row.updated_at,
-    updated_by: row.updated_by,
-    data: row.teacher ? {
-      teachers: [row.teacher],
-      bookings: Array.isArray(row.bookings) ? row.bookings : [],
-      students: Array.isArray(row.students) ? row.students : [],
-      teacherStudentNotes: Array.isArray(row.teacher_student_notes) ? row.teacher_student_notes : [],
-      publicHolidays: Array.isArray(row.public_holidays) ? row.public_holidays : [],
-      teacherLeaves: Array.isArray(row.teacher_leaves) ? row.teacher_leaves : []
-    } : null
+    key: composed.key,
+    version: composed.version,
+    updated_at: composed.updatedAt,
+    updated_by: composed.updatedBy,
+    data: {
+      teachers: [safeTeacher],
+      bookings: teacherBookings,
+      students,
+      teacherStudentNotes: (full.teacherStudentNotes || []).filter(note => note.teacherId === teacher.id),
+      publicHolidays: (full.publicHolidays || []).filter(holiday => {
+        const status = String(holiday.status || "active").toLowerCase();
+        const deleted = String(holiday.deleted || "false").toLowerCase();
+        return !["deleted", "removed", "archived"].includes(status) && !["true", "1", "yes"].includes(deleted) && dateIntersects(holiday);
+      }),
+      teacherLeaves: (full.teacherLeaves || []).filter(leave => {
+        const status = String(leave.status || "active").toLowerCase();
+        const deleted = String(leave.deleted || "false").toLowerCase();
+        return leave.teacherId === teacher.id
+          && !["deleted", "removed", "cancelled", "canceled", "withdrawn", "inactive", "superseded", "undone"].includes(status)
+          && !["true", "1", "yes"].includes(deleted)
+          && dateIntersects(leave);
+      })
+    }
   };
 }
 

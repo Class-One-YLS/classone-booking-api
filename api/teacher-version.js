@@ -1,4 +1,5 @@
-const { getSql, ensureCoreTables } = require("../lib/db");
+const { ensureCoreTables } = require("../lib/db");
+const { loadComposedState } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, safeError } = require("../lib/http");
 
 function stateKey(req) {
@@ -22,49 +23,24 @@ module.exports = async function handler(req, res) {
   try {
     if (req.method !== "GET") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
     await ensureCoreTables();
-    const sql = getSql();
     const key = stateKey(req);
     const rawTeacher = String((req.query && (req.query.teacherId || req.query.teacher)) || "").trim();
     if (!rawTeacher) return sendJson(res, 400, { ok: false, error: "Teacher is required." });
     const compactTeacher = compactName(rawTeacher);
-    const rows = await sql`
-      with source as (
-        select key, data, version, updated_at
-        from app_state
-        where key = ${key}
-        limit 1
-      )
-      select
-        source.key,
-        source.version,
-        source.updated_at,
-        jsonb_build_object(
-          'id', teacher.value->>'id',
-          'viewToken', teacher.value->>'viewToken',
-          'timetableToken', teacher.value->>'timetableToken',
-          'shareToken', teacher.value->>'shareToken'
-        ) as teacher
-      from source
-      cross join lateral jsonb_array_elements(coalesce(source.data->'teachers', '[]'::jsonb)) as teacher(value)
-      where teacher.value->>'id' = ${rawTeacher}
-         or lower(coalesce(teacher.value->>'name', '')) = lower(${rawTeacher})
-         or regexp_replace(lower(coalesce(teacher.value->>'name', '')), '[^a-z0-9]+', '', 'g') = ${compactTeacher}
-      order by case
-        when teacher.value->>'id' = ${rawTeacher} then 0
-        when lower(coalesce(teacher.value->>'name', '')) = lower(${rawTeacher}) then 1
-        else 2
-      end
-      limit 1
-    `;
-    if (!rows.length) return sendJson(res, 404, { ok: false, error: "Teacher timetable is not ready yet." });
-    const row = rows[0];
-    if (!hasTeacherToken(req, row.teacher || {})) return sendJson(res, 401, { ok: false, error: "Teacher timetable link is invalid or not synced yet." });
+    const row = await loadComposedState(key, { backfill: false });
+    const teachers = Array.isArray(row.data?.teachers) ? row.data.teachers : [];
+    const teacher = teachers.find(item => item.id === rawTeacher)
+      || teachers.find(item => String(item.name || "").toLowerCase() === rawTeacher.toLowerCase())
+      || teachers.find(item => compactName(item.name) === compactTeacher);
+    if (!teacher) return sendJson(res, 404, { ok: false, error: "Teacher timetable is not ready yet." });
+    if (!hasTeacherToken(req, teacher || {})) return sendJson(res, 401, { ok: false, error: "Teacher timetable link is invalid or not synced yet." });
     return sendJson(res, 200, {
       ok: true,
       key: row.key,
-      teacherId: row.teacher.id,
+      teacherId: teacher.id,
       version: Number(row.version || 0),
-      updatedAt: row.updated_at,
+      updatedAt: row.updatedAt,
+      composed: true,
       serverTime: new Date().toISOString()
     });
   } catch (error) {

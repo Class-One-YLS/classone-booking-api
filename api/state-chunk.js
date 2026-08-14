@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { getSql, ensureCoreTables } = require("../lib/db");
+const { loadComposedState } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../lib/http");
 
 function stateKey(req, body) {
@@ -90,63 +91,36 @@ function splitText(text, chunkSize = 350000) {
 
 async function getManifest(req, res) {
   await ensureCoreTables();
-  const sql = getSql();
   const key = stateKey(req);
-  const rows = await sql`
-    select key, version, updated_at, updated_by
-    from app_state
-    where key = ${key}
-    limit 1
-  `;
-  if (!rows.length) {
+  const row = await loadComposedState(key);
+  if (!row.data) {
     return sendJson(res, 200, { ok: true, key, empty: true, version: 0, totalChunks: 0, updatedAt: null, updatedBy: null });
   }
-  const row = rows[0];
-  const countRows = await sql`
-    select count(*)::int as count
-    from app_state_text_chunks
-    where state_key = ${key} and version = ${row.version}
-  `;
-  let totalChunks = Number(countRows[0].count || 0);
-  if (!totalChunks) {
-    const stateRows = await sql`select data::text as data_text from app_state where key = ${key} limit 1`;
-    const chunks = splitText(stateRows[0].data_text || "{}");
-    await sql`delete from app_state_text_chunks where state_key = ${key} and version = ${row.version}`;
-    for (let index = 0; index < chunks.length; index += 1) {
-      await sql`
-        insert into app_state_text_chunks (state_key, version, chunk_index, chunk_data)
-        values (${key}, ${row.version}, ${index}, ${chunks[index]})
-      `;
-    }
-    totalChunks = chunks.length;
-  }
+  const chunks = splitText(JSON.stringify(row.data || {}));
   return sendJson(res, 200, {
     ok: true,
     key,
     empty: false,
     version: Number(row.version || 0),
-    totalChunks,
-    updatedAt: row.updated_at,
-    updatedBy: row.updated_by || null
+    totalChunks: chunks.length,
+    updatedAt: row.updatedAt,
+    updatedBy: row.updatedBy || null,
+    composed: true
   });
 }
 
 async function getChunk(req, res) {
   await ensureCoreTables();
-  const sql = getSql();
   const key = stateKey(req);
   const version = Number(req.query.version || 0);
   const index = Number(req.query.chunk || 0);
   if (!Number.isInteger(index) || index < 0) return sendJson(res, 400, { ok: false, error: "Invalid chunk index." });
-
-  const rows = await sql`
-    select chunk_data
-    from app_state_text_chunks
-    where state_key = ${key} and version = ${version} and chunk_index = ${index}
-    limit 1
-  `;
-  if (!rows.length) return sendJson(res, 404, { ok: false, error: "Chunk not found." });
-  return sendJson(res, 200, { ok: true, key, version, index, chunk: rows[0].chunk_data });
+  const row = await loadComposedState(key);
+  const currentVersion = Number(row.version || 0);
+  if (!row.data || (version && version !== currentVersion)) return sendJson(res, 404, { ok: false, error: "Chunk not found." });
+  const chunks = splitText(JSON.stringify(row.data || {}));
+  if (index >= chunks.length) return sendJson(res, 404, { ok: false, error: "Chunk not found." });
+  return sendJson(res, 200, { ok: true, key, version: currentVersion, index, chunk: chunks[index], composed: true });
 }
 
 async function initUpload(req, body, res) {
