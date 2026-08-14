@@ -126,9 +126,17 @@ function testMigratedEndpointConstantsAreEnabled() {
   assert(frontend.includes('"/api/recurring-assignments/upsert"'));
 }
 
+function testOutcomePostSuccessRefreshUsesExistingRenderers() {
+  assert(!/renderActivity\s*\(/.test(frontend), "outcome success path must not call missing renderActivity()");
+  assert(/function renderActivityLog\s*\(/.test(frontend), "Activity Log renderer must exist");
+  assert(/function refreshBookingOutcomeUi\s*\(/.test(frontend), "booking outcome UI refresh wrapper must exist");
+  assert(frontend.includes("Booking outcome saved, but UI refresh failed"), "post-save UI refresh errors must be separated from persistence failures");
+}
+
 testRecurringAssignmentIdentityAllowsSameTeacherSameTimeDifferentDays();
 testOverlayRecurringAssignmentsIsRecordLevel();
 testDeltaSuccessPathsDoNotCallLegacySave();
 testMigratedEndpointConstantsAreEnabled();
+testOutcomePostSuccessRefreshUsesExistingRenderers();
 
 console.log("phase2 architecture tests passed");
