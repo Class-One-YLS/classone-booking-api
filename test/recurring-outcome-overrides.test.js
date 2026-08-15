@@ -81,6 +81,21 @@ function resolvedCell(state, date = "2026-08-14") {
   return cells.find(item => item.cellKey === teacherDateTimeKey(teacher.id, date, "14:30"));
 }
 
+function resolvedCells(state, from = "2026-08-14", to = "2026-08-14") {
+  const teacher = state.teachers[0];
+  return resolveTeacherCalendar(state, {
+    teacher,
+    teacherId: teacher.id,
+    from,
+    to,
+    stateVersion: 1
+  }).cells;
+}
+
+function paidCompletedCells(cells) {
+  return cells.filter(cell => cell.status === "completed" && cell.type !== "practical class");
+}
+
 function testBaseRecurringClassOnly() {
   const cell = resolvedCell(baseState());
   assert.equal(cell.status, "booked");
@@ -121,10 +136,14 @@ function testCancelledDateOnlyDoesNotEndRecurringAssignment() {
   const state = baseState([outcomeBooking("cancelled")]);
   const cancelled = resolvedCell(state, "2026-08-14");
   const nextWeek = resolvedCell(state, "2026-08-21");
+  const followingWeek = resolvedCell(state, "2026-08-28");
   assert.equal(cancelled.status, "cancelled");
   assert.equal(nextWeek.status, "booked");
   assert.equal(nextWeek.studentName, "Elyisa Arielle Raj");
   assert.equal(nextWeek.bookingId, "");
+  assert.equal(followingWeek.status, "booked");
+  assert.equal(followingWeek.studentName, "Elyisa Arielle Raj");
+  assert.equal(followingWeek.bookingId, "");
 }
 
 function testRestoreBookedOutcomeReturnsClassForExactDate() {
@@ -139,6 +158,40 @@ function testRepeatedCancellationChoosesOneCanonicalLatestOutcome() {
   const cell = resolvedCell(baseState([older, newer]));
   assert.equal(cell.status, "cancelled");
   assert.equal(cell.bookingId, "outcome_elyisa_cancelled_new");
+}
+
+function testCancelledOutcomeBeatsLaterGeneratedCompletionForSameOccurrence() {
+  const cancelled = outcomeBooking("cancelled", { id: "outcome_elyisa_cancelled", updatedAt: "2026-08-14T05:00:00.000Z" });
+  const generatedCompleted = outcomeBooking("completed", { id: "fixed_snapshot_elyisa_completed", updatedAt: "2026-08-14T09:00:00.000Z" });
+  generatedCompleted.source = "fixed_regular_snapshot";
+  const cell = resolvedCell(baseState([cancelled, generatedCompleted]));
+  assert.equal(cell.status, "cancelled");
+  assert.equal(cell.bookingId, "outcome_elyisa_cancelled");
+}
+
+function testNotShowOutcomeBeatsLaterGeneratedCompletionForSameOccurrence() {
+  const notShow = outcomeBooking("student_not_show", { id: "outcome_elyisa_not_show", updatedAt: "2026-08-14T05:00:00.000Z" });
+  const generatedCompleted = outcomeBooking("completed", { id: "fixed_snapshot_elyisa_not_show_completed", updatedAt: "2026-08-14T09:00:00.000Z" });
+  generatedCompleted.source = "fixed_regular_snapshot";
+  const cell = resolvedCell(baseState([notShow, generatedCompleted]));
+  assert.equal(cell.status, "student_not_show");
+  assert.equal(cell.bookingId, "outcome_elyisa_not_show");
+}
+
+function testCancelledOccurrenceExcludedFromCompletedAndIncomeLikeCounts() {
+  const cancelled = outcomeBooking("cancelled", { id: "outcome_elyisa_cancelled", updatedAt: "2026-08-14T05:00:00.000Z" });
+  const generatedCompleted = outcomeBooking("completed", { id: "fixed_snapshot_elyisa_completed", updatedAt: "2026-08-14T09:00:00.000Z" });
+  generatedCompleted.source = "fixed_regular_snapshot";
+  const cells = resolvedCells(baseState([cancelled, generatedCompleted]));
+  assert.equal(paidCompletedCells(cells).length, 0);
+  assert.equal(cells.find(cell => cell.time === "14:30").status, "cancelled");
+}
+
+function testNormalCompletedOccurrenceCountsAsPaidCompleted() {
+  const completed = outcomeBooking("completed", { id: "outcome_elyisa_completed_valid", updatedAt: "2026-08-14T09:00:00.000Z" });
+  const cells = resolvedCells(baseState([completed]));
+  assert.equal(paidCompletedCells(cells).length, 1);
+  assert.equal(cells.find(cell => cell.time === "14:30").status, "completed");
 }
 
 function upsertLocalRecord(state, collectionName, record) {
@@ -202,6 +255,10 @@ testExactNotShowOutcomeSuppressesVirtualRecurringClass();
 testCancelledDateOnlyDoesNotEndRecurringAssignment();
 testRestoreBookedOutcomeReturnsClassForExactDate();
 testRepeatedCancellationChoosesOneCanonicalLatestOutcome();
+testCancelledOutcomeBeatsLaterGeneratedCompletionForSameOccurrence();
+testNotShowOutcomeBeatsLaterGeneratedCompletionForSameOccurrence();
+testCancelledOccurrenceExcludedFromCompletedAndIncomeLikeCounts();
+testNormalCompletedOccurrenceCountsAsPaidCompleted();
 testReadAfterWriteCancelledResponseSuppressesRecurringClass();
 testReadAfterWriteResponseWithOnlyOccurrenceKeySuppressesRecurringClass();
 
