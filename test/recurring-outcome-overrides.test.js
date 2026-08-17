@@ -120,6 +120,52 @@ function testExactCancelledOutcomeSuppressesVirtualRecurringClass() {
   assert.equal(cell.studentName, "Elyisa Arielle Raj");
 }
 
+function testLegacyCancelledSameStudentWithoutOccurrenceMetadataStillOwnsCell() {
+  const legacyCancelled = outcomeBooking("cancelled", {
+    id: "legacy_cancelled_without_occurrence_metadata",
+    sourceSlotId: "",
+    recurringSourceSlotId: "",
+    updatedAt: "2026-08-14T05:30:00.000Z"
+  });
+  delete legacyCancelled.normalizedRecurringAssignmentId;
+  delete legacyCancelled.assignmentId;
+  delete legacyCancelled.recurringAssignmentId;
+  delete legacyCancelled.sourceSlotId;
+  delete legacyCancelled.recurringSourceSlotId;
+  delete legacyCancelled.occurrenceKey;
+  delete legacyCancelled.occurrenceId;
+  delete legacyCancelled.sourceOccurrenceKey;
+  delete legacyCancelled.sourceOccurrenceId;
+  const cell = resolvedCell(baseState([legacyCancelled]));
+  assert.equal(cell.status, "cancelled");
+  assert.equal(cell.bookingId, "legacy_cancelled_without_occurrence_metadata");
+  assert.equal(cell.studentName, "Elyisa Arielle Raj");
+}
+
+function testLegacyCancelledDifferentStudentYieldsToActiveRecurringSlot() {
+  const legacyCancelled = outcomeBooking("cancelled", {
+    id: "legacy_cancelled_different_student",
+    sourceSlotId: "",
+    recurringSourceSlotId: "",
+    updatedAt: "2026-08-14T05:30:00.000Z"
+  });
+  legacyCancelled.studentId = "student_previous";
+  legacyCancelled.studentName = "Previous Student";
+  delete legacyCancelled.normalizedRecurringAssignmentId;
+  delete legacyCancelled.assignmentId;
+  delete legacyCancelled.recurringAssignmentId;
+  delete legacyCancelled.sourceSlotId;
+  delete legacyCancelled.recurringSourceSlotId;
+  delete legacyCancelled.occurrenceKey;
+  delete legacyCancelled.occurrenceId;
+  delete legacyCancelled.sourceOccurrenceKey;
+  delete legacyCancelled.sourceOccurrenceId;
+  const cell = resolvedCell(baseState([legacyCancelled]));
+  assert.equal(cell.status, "booked");
+  assert.equal(cell.bookingId, "");
+  assert.equal(cell.studentName, "Elyisa Arielle Raj");
+}
+
 function testExactCompletedOutcomeSuppressesVirtualRecurringClass() {
   const cell = resolvedCell(baseState([outcomeBooking("completed")]));
   assert.equal(cell.status, "completed");
@@ -250,6 +296,8 @@ function testReadAfterWriteResponseWithOnlyOccurrenceKeySuppressesRecurringClass
 testBaseRecurringClassOnly();
 testCanonicalOccurrenceIdentityUsesNormalizedAssignmentAlias();
 testExactCancelledOutcomeSuppressesVirtualRecurringClass();
+testLegacyCancelledSameStudentWithoutOccurrenceMetadataStillOwnsCell();
+testLegacyCancelledDifferentStudentYieldsToActiveRecurringSlot();
 testExactCompletedOutcomeSuppressesVirtualRecurringClass();
 testExactNotShowOutcomeSuppressesVirtualRecurringClass();
 testCancelledDateOnlyDoesNotEndRecurringAssignment();
