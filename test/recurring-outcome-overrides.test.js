@@ -8,6 +8,8 @@ const {
   teacherDateTimeKey
 } = require("../lib/calendar-resolver");
 
+const TEST_NOW_BEFORE_RANGE = Date.parse("2026-01-01T00:00:00+08:00");
+
 function baseState(bookings = []) {
   const teacher = {
     id: "teacher_catherine_mu",
@@ -76,7 +78,8 @@ function resolvedCell(state, date = "2026-08-14") {
     teacherId: teacher.id,
     from: date,
     to: date,
-    stateVersion: 1
+    stateVersion: 1,
+    nowMs: TEST_NOW_BEFORE_RANGE
   }).cells;
   return cells.find(item => item.cellKey === teacherDateTimeKey(teacher.id, date, "14:30"));
 }
@@ -88,7 +91,8 @@ function resolvedCells(state, from = "2026-08-14", to = "2026-08-14") {
     teacherId: teacher.id,
     from,
     to,
-    stateVersion: 1
+    stateVersion: 1,
+    nowMs: TEST_NOW_BEFORE_RANGE
   }).cells;
 }
 

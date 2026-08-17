@@ -4,6 +4,8 @@ const {
   teacherDateTimeKey
 } = require("../lib/calendar-resolver");
 
+const TEST_NOW_BEFORE_RANGE = Date.parse("2026-01-01T00:00:00+08:00");
+
 function baseTeacher(extra = {}) {
   return {
     id: "teacher_peggy",
@@ -21,7 +23,8 @@ function resolve(state, from, to) {
     teacherId: state.teachers[0].id,
     from,
     to,
-    stateVersion: 1
+    stateVersion: 1,
+    nowMs: TEST_NOW_BEFORE_RANGE
   }).cells;
 }
 
@@ -181,7 +184,8 @@ function testLeeShokYuongNgooiJunRecurringStaysBooked() {
     teacherId: teacher.id,
     from: "2026-07-16",
     to: "2026-07-16",
-    stateVersion: 1
+    stateVersion: 1,
+    nowMs: TEST_NOW_BEFORE_RANGE
   }).cells;
   const resolved = cells.find(item => item.cellKey === teacherDateTimeKey("teacher_lee_shok_yuong", "2026-07-16", "20:30"));
   assert.equal(resolved && resolved.studentName, "Ngooi Jun");
@@ -241,6 +245,95 @@ function testStudentNotShowDisplaysLatestStatus() {
     }]
   }, "2026-07-01", "2026-07-01");
   assert.equal(cell(cells, "2026-07-01", "20:00").status, "student_not_show");
+}
+
+function testPastActiveClassDisplaysCompletedAfterEndTimeOnly() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "slot_friday_1430",
+      day: "Friday",
+      time: "14:30",
+      locked: true,
+      studentId: "student_past",
+      studentName: "Past Student",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-08-01",
+      updatedAt: "2026-08-01T00:00:00.000Z"
+    }]
+  });
+  const state = { teachers: [teacher], students: [], bookings: [] };
+  const beforeEnd = resolveTeacherCalendar(state, {
+    teacher,
+    teacherId: teacher.id,
+    from: "2026-08-14",
+    to: "2026-08-14",
+    stateVersion: 1,
+    nowMs: Date.parse("2026-08-14T14:54:00+08:00")
+  }).cells;
+  assert.equal(cell(beforeEnd, "2026-08-14", "14:30").status, "booked");
+
+  const afterEnd = resolveTeacherCalendar(state, {
+    teacher,
+    teacherId: teacher.id,
+    from: "2026-08-14",
+    to: "2026-08-14",
+    stateVersion: 1,
+    nowMs: Date.parse("2026-08-14T14:56:00+08:00")
+  }).cells;
+  assert.equal(cell(afterEnd, "2026-08-14", "14:30").status, "completed");
+}
+
+function testTerminalStatusesBeatAutomaticCompletion() {
+  const teacher = baseTeacher();
+  const cells = resolveTeacherCalendar({
+    teachers: [teacher],
+    students: [],
+    bookings: [{
+      id: "past_cancelled",
+      teacherId: teacher.id,
+      date: "2026-08-14",
+      time: "14:30",
+      studentName: "Cancelled Student",
+      subject: "CN",
+      type: "regular class",
+      status: "cancelled",
+      cancelledAt: "2026-08-14T05:00:00.000Z",
+      updatedAt: "2026-08-14T05:00:00.000Z"
+    }, {
+      id: "past_not_show",
+      teacherId: teacher.id,
+      date: "2026-08-14",
+      time: "15:00",
+      studentName: "Not Show Student",
+      subject: "CN",
+      type: "regular class",
+      status: "student_not_show",
+      studentNotShowAt: "2026-08-14T06:00:00.000Z",
+      updatedAt: "2026-08-14T06:00:00.000Z"
+    }, {
+      id: "past_teacher_leave",
+      teacherId: teacher.id,
+      date: "2026-08-14",
+      time: "15:30",
+      studentName: "Leave Student",
+      subject: "CN",
+      type: "regular class",
+      status: "teacher_leave",
+      teacherLeaveId: "leave_1",
+      updatedAt: "2026-08-14T07:00:00.000Z"
+    }]
+  }, {
+    teacher,
+    teacherId: teacher.id,
+    from: "2026-08-14",
+    to: "2026-08-14",
+    stateVersion: 1,
+    nowMs: Date.parse("2026-08-15T00:00:00+08:00")
+  }).cells;
+  assert.equal(cell(cells, "2026-08-14", "14:30").status, "cancelled");
+  assert.equal(cell(cells, "2026-08-14", "15:00").status, "student_not_show");
+  assert.equal(cell(cells, "2026-08-14", "15:30").status, "teacher_leave");
 }
 
 function testSetOffSupersedesOlderBooking() {
@@ -580,7 +673,8 @@ function testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate() {
     teacherId: teacher.id,
     from: "2026-07-25",
     to: "2026-08-01",
-    stateVersion: 1
+    stateVersion: 1,
+    nowMs: TEST_NOW_BEFORE_RANGE
   }).cells;
   const cancelledOccurrence = cells.find(item => item.cellKey === teacherDateTimeKey(teacher.id, "2026-07-25", "11:30"));
   assert.equal(cancelledOccurrence && cancelledOccurrence.studentName, "Alynna Gan Shin Yi");
@@ -932,6 +1026,8 @@ testStaleOpenOverrideDoesNotHideLockedRegularSlot();
 testLeeShokYuongNgooiJunRecurringStaysBooked();
 testLatestBookingRecordWins();
 testStudentNotShowDisplaysLatestStatus();
+testPastActiveClassDisplaysCompletedAfterEndTimeOnly();
+testTerminalStatusesBeatAutomaticCompletion();
 testSetOffSupersedesOlderBooking();
 testResolvedCellParityCases();
 testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate();
