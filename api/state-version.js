@@ -22,6 +22,7 @@ module.exports = async function handler(req, res) {
         phase1BookingOutcome: true,
         phase2BookingCreate: true,
         phase2RecurringAssignments: true,
+        recordTransactions: true,
         composedState: true,
         recurringBackfillStatus: true,
         bookingBackfillStatus: true
@@ -31,6 +32,7 @@ module.exports = async function handler(req, res) {
         bookingCreate: "/api/bookings/create",
         recurringAssignmentUpsert: "/api/recurring-assignments/upsert",
         recurringAssignmentBackfill: "/api/recurring-assignments/backfill",
+        recordTransaction: "/api/records/transaction",
         bookingBackfill: "/api/bookings/backfill",
         teacherView: "/api/teacher-view"
       }

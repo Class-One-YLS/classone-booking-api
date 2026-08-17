@@ -3,7 +3,7 @@ const { ensureCoreTables, getPool } = require("../../lib/db");
 const { backfillBookingsFromAppState, dateOnly, loadComposedState, stateKey, timeOnly } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
-const ALLOWED_OUTCOMES = new Set(["cancelled", "completed", "student_not_show", "booked", "restore"]);
+const ALLOWED_OUTCOMES = new Set(["cancelled", "completed", "student_not_show", "teacher_leave", "public_holiday", "booked", "restore"]);
 
 function normalizedEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -109,6 +109,8 @@ function normalizeOutcomeBookingRecord(record, outcome, now) {
     booking.resolutionStatus = finalStatus;
   }
   if (finalStatus === "cancelled") booking.cancelledAt = booking.cancelledAt || now;
+  if (finalStatus === "teacher_leave") booking.teacherLeaveAt = booking.teacherLeaveAt || now;
+  if (finalStatus === "public_holiday") booking.publicHolidayAt = booking.publicHolidayAt || now;
   if (finalStatus === "student_not_show") booking.studentNotShowAt = booking.studentNotShowAt || now;
   if (finalStatus === "completed") {
     booking.completedAt = booking.completedAt || now;
