@@ -1,10 +1,11 @@
 const crypto = require("node:crypto");
 const { ensureCoreTables, getPool } = require("../../lib/db");
-const { dateOnly, loadComposedState, stateKey, timeOnly } = require("../../lib/composed-state");
+const { dateOnly, loadComposedState, normalizeRecurringAssignment, stateKey, timeOnly } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 const COLLECTION_TABLES = new Map([
   ["bookings", "booking"],
+  ["recurringAssignments", "recurringAssignment"],
   ["replacements", "replacement"],
   ["replacementCredits", "replacementCredit"],
   ["activityLogs", "activityLog"],
@@ -60,7 +61,7 @@ function cleanStatus(value) {
 }
 
 function recordId(record) {
-  return String(record?.id || record?.bookingId || record?.creditId || record?.replacementId || "").trim();
+  return String(record?.id || record?.bookingId || record?.assignmentId || record?.normalizedRecurringAssignmentId || record?.recurringAssignmentId || record?.creditId || record?.replacementId || "").trim();
 }
 
 function recordTime(record) {
@@ -159,6 +160,55 @@ async function upsertReplacementTable(client, key, collectionName, record) {
   return data;
 }
 
+async function upsertRecurringAssignment(client, key, record) {
+  const assignment = normalizeRecurringAssignment(record, null, record.sourceCollection || "regularSlots");
+  const id = String(assignment.assignmentId || "").trim();
+  if (!id) throw new Error("Recurring assignment id is required.");
+  const current = await client.query(
+    "select data, record_version from recurring_assignments_v2 where state_key = $1 and assignment_id = $2 for update",
+    [key, id]
+  );
+  if (current.rows.length && !currentRecordWins(assignment, current.rows[0].data, id)) {
+    return current.rows[0].data;
+  }
+  const nextVersion = Number(current.rows[0]?.record_version || current.rows[0]?.data?.recordVersion || 0) + 1;
+  const data = { ...(current.rows[0]?.data || {}), ...assignment, assignmentId: id, normalizedRecurringAssignmentId: id, recordVersion: nextVersion };
+  await client.query(
+    `insert into recurring_assignments_v2 (
+       state_key, assignment_id, teacher_id, student_id, weekday, class_time, status,
+       source_collection, source_slot_id, student_slot_id, record_version, data
+     )
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+     on conflict (state_key, assignment_id) do update
+     set teacher_id = excluded.teacher_id,
+         student_id = excluded.student_id,
+         weekday = excluded.weekday,
+         class_time = excluded.class_time,
+         status = excluded.status,
+         source_collection = excluded.source_collection,
+         source_slot_id = excluded.source_slot_id,
+         student_slot_id = excluded.student_slot_id,
+         record_version = excluded.record_version,
+         data = excluded.data,
+         updated_at = now()`,
+    [
+      key,
+      id,
+      data.teacherId || "",
+      data.studentId || "",
+      data.day || data.weekday || "",
+      timeOnly(data.time),
+      data.status || "active",
+      data.sourceCollection || "regularSlots",
+      data.sourceSlotId || "",
+      data.studentSlotId || "",
+      nextVersion,
+      JSON.stringify(data)
+    ]
+  );
+  return data;
+}
+
 async function upsertActivity(client, key, record, actor) {
   const id = recordId(record);
   if (!id) throw new Error("Activity log id is required.");
@@ -208,6 +258,7 @@ async function upsertRecord(client, key, collectionName, record, actor) {
   const kind = COLLECTION_TABLES.get(collectionName);
   if (!kind) throw new Error(`Unsupported record collection: ${collectionName}`);
   if (kind === "booking") return upsertBooking(client, key, record);
+  if (kind === "recurringAssignment") return upsertRecurringAssignment(client, key, record);
   if (kind === "replacement" || kind === "replacementCredit") return upsertReplacementTable(client, key, collectionName, record);
   if (kind === "activityLog") return upsertActivity(client, key, record, actor);
   return upsertCollectionRecord(client, key, collectionName, record);
