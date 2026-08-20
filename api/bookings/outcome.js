@@ -1,9 +1,81 @@
 const crypto = require("node:crypto");
 const { ensureCoreTables, getPool } = require("../../lib/db");
-const { backfillBookingsFromAppState, dateOnly, loadComposedState, stateKey, timeOnly } = require("../../lib/composed-state");
+const { dateOnly, loadComposedState, stateKey, timeOnly } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 const ALLOWED_OUTCOMES = new Set(["cancelled", "completed", "student_not_show", "teacher_leave", "public_holiday", "booked", "restore"]);
+const OUTCOME_MAX_ATTEMPTS = 2;
+
+function nowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
+  return Date.now();
+}
+
+function createOutcomeTrace() {
+  return {
+    startedAt: nowMs(),
+    lastAt: nowMs(),
+    requestId: "",
+    bookingId: "",
+    outcome: "",
+    attempt: 0,
+    stages: []
+  };
+}
+
+function markOutcomeTrace(trace, stage, details = {}) {
+  if (!trace) return;
+  const at = nowMs();
+  trace.stages.push({
+    stage,
+    ms: Math.round((at - trace.lastAt) * 10) / 10,
+    totalMs: Math.round((at - trace.startedAt) * 10) / 10,
+    ...details
+  });
+  trace.lastAt = at;
+}
+
+function logOutcomeTrace(trace, level = "info", extra = {}) {
+  if (!trace) return;
+  const payload = {
+    endpoint: "/api/bookings/outcome",
+    requestId: trace.requestId,
+    bookingId: trace.bookingId,
+    outcome: trace.outcome,
+    attempt: trace.attempt,
+    totalMs: Math.round((nowMs() - trace.startedAt) * 10) / 10,
+    stages: trace.stages,
+    ...extra
+  };
+  const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+  logger("BOOKING OUTCOME DELTA SYNC", payload);
+}
+
+function isRetryableDbTermination(error) {
+  const message = String(error && error.message || "").toLowerCase();
+  const code = String(error && error.code || "").toLowerCase();
+  return (
+    message.includes("terminated") ||
+    message.includes("connection terminated") ||
+    message.includes("connection closed") ||
+    message.includes("client has encountered a connection error") ||
+    message.includes("timeout exceeded") ||
+    code === "57p01" ||
+    code === "57p02" ||
+    code === "57p03" ||
+    code === "08006" ||
+    code === "08003" ||
+    code === "econnreset" ||
+    code === "etimedout"
+  );
+}
+
+function outcomeSafeError(error) {
+  if (isRetryableDbTermination(error)) {
+    return "Booking outcome sync could not reach the database. Please retry.";
+  }
+  return safeError(error);
+}
 
 function normalizedEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -142,34 +214,58 @@ function upsertRecordSql(table, idColumn, id, data, extra = {}) {
 }
 
 async function handleOutcome(req, res) {
+  const trace = createOutcomeTrace();
+  markOutcomeTrace(trace, "request start");
   await ensureCoreTables();
+  markOutcomeTrace(trace, "schema ready");
   const body = await readJson(req);
+  markOutcomeTrace(trace, "request body parsed", { bytes: Buffer.byteLength(JSON.stringify(body || {}), "utf8") });
   const key = stateKey(req, body);
   const requestId = String(body.requestId || "").trim();
   const booking = body.booking && typeof body.booking === "object" ? body.booking : null;
   const outcome = cleanOutcome(body.outcome || booking?.status);
   const bookingId = canonicalBookingId(booking || {}, body);
+  trace.requestId = requestId;
+  trace.bookingId = bookingId;
+  trace.outcome = outcome;
   if (!requestId) return sendJson(res, 400, { ok: false, error: "requestId is required." });
   if (!bookingId || !booking) return sendJson(res, 400, { ok: false, error: "bookingId and booking are required." });
   if (!ALLOWED_OUTCOMES.has(outcome)) return sendJson(res, 400, { ok: false, error: "Unsupported booking outcome for delta sync." });
 
   const composed = await loadComposedState(key, { backfill: true });
+  markOutcomeTrace(trace, "composed state loaded");
   const email = verifiedSessionEmail(req, body);
   if (!userCanWrite(composed.data || {}, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to save booking outcomes." });
   }
+  markOutcomeTrace(trace, "permission checked");
 
   const pool = getPool();
-  const client = await pool.connect();
-  try {
+  let lastError = null;
+  for (let attempt = 1; attempt <= OUTCOME_MAX_ATTEMPTS; attempt += 1) {
+    trace.attempt = attempt;
+    let client = null;
+    let releaseError = null;
+    let transactionOpen = false;
+    let committed = false;
+    try {
+    client = await pool.connect();
+    markOutcomeTrace(trace, "client acquired", { attempt });
     await client.query("begin");
+    transactionOpen = true;
+    markOutcomeTrace(trace, "begin", { attempt });
 
     const previousRequest = await client.query(
       "select response from booking_outcome_requests_v2 where state_key = $1 and request_id = $2 limit 1",
       [key, requestId]
     );
+    markOutcomeTrace(trace, "idempotency lookup", { found: Boolean(previousRequest.rows.length) });
     if (previousRequest.rows.length) {
       await client.query("commit");
+      committed = true;
+      transactionOpen = false;
+      markOutcomeTrace(trace, "commit", { idempotent: true });
+      logOutcomeTrace(trace);
       return sendJson(res, 200, previousRequest.rows[0].response);
     }
 
@@ -177,6 +273,7 @@ async function handleOutcome(req, res) {
       "select booking_id, record_version, data from booking_records_v2 where state_key = $1 and booking_id = $2 for update",
       [key, bookingId]
     );
+    markOutcomeTrace(trace, "booking row locked", { found: Boolean(current.rows.length) });
     if (!current.rows.length) {
       await client.query(
         `insert into booking_records_v2 (state_key, booking_id, teacher_id, student_id, class_date, class_time, status, record_version, data)
@@ -193,16 +290,20 @@ async function handleOutcome(req, res) {
           JSON.stringify({ ...booking, id: bookingId, bookingId, recordVersion: 0 })
         ]
       );
+      markOutcomeTrace(trace, "missing booking inserted");
       current = await client.query(
         "select booking_id, record_version, data from booking_records_v2 where state_key = $1 and booking_id = $2 for update",
         [key, bookingId]
       );
+      markOutcomeTrace(trace, "inserted booking locked", { found: Boolean(current.rows.length) });
     }
 
     const currentVersion = rowDataVersion(current.rows[0]);
     const expected = body.expectedRecordVersion == null ? currentVersion : Number(body.expectedRecordVersion);
     if (Number.isFinite(expected) && expected !== currentVersion) {
       await client.query("rollback");
+      transactionOpen = false;
+      markOutcomeTrace(trace, "record conflict rollback", { currentRecordVersion: currentVersion });
       return sendJson(res, 409, {
         ok: false,
         code: "RECORD_CONFLICT",
@@ -250,6 +351,7 @@ async function handleOutcome(req, res) {
         JSON.stringify(savedBooking)
       ]
     );
+    markOutcomeTrace(trace, "booking update", { recordVersion: nextVersion });
 
     const replacementTask = body.replacementTask && typeof body.replacementTask === "object" ? body.replacementTask : null;
     const replacementCredit = body.replacementCredit && typeof body.replacementCredit === "object" ? body.replacementCredit : null;
@@ -270,6 +372,7 @@ async function handleOutcome(req, res) {
              updated_at = now()`,
         [key, item.id, item.sourceBookingId, item.sourceOccurrenceId, item.studentId, item.teacherId, item.originalDate, item.originalTime, JSON.stringify(replacementTask)]
       );
+      markOutcomeTrace(trace, "replacement side effects", { type: "task" });
     }
     if (replacementCredit?.id) {
       const item = upsertRecordSql("replacement_credit_records_v2", "credit_id", replacementCredit.id, replacementCredit);
@@ -288,6 +391,7 @@ async function handleOutcome(req, res) {
              updated_at = now()`,
         [key, item.id, item.sourceBookingId, item.sourceOccurrenceId, item.studentId, item.teacherId, item.originalDate, item.originalTime, JSON.stringify(replacementCredit)]
       );
+      markOutcomeTrace(trace, "replacement side effects", { type: "credit" });
     }
 
     const activityLog = body.activityLog && typeof body.activityLog === "object" ? body.activityLog : null;
@@ -307,6 +411,7 @@ async function handleOutcome(req, res) {
           JSON.stringify(activityLog)
         ]
       );
+      markOutcomeTrace(trace, "activity event");
     }
 
     const versionRows = await client.query(
@@ -329,6 +434,7 @@ async function handleOutcome(req, res) {
        returning version, updated_at`,
       [key]
     );
+    markOutcomeTrace(trace, "system version updated", { version: Number(versionRows.rows[0].version || 0) });
     const response = {
       ok: true,
       success: true,
@@ -346,14 +452,36 @@ async function handleOutcome(req, res) {
        values ($1,$2,$3,$4,$5::jsonb)`,
       [key, requestId, bookingId, crypto.createHash("sha1").update(JSON.stringify(body)).digest("hex"), JSON.stringify(response)]
     );
+    markOutcomeTrace(trace, "idempotency response saved");
     await client.query("commit");
+    committed = true;
+    transactionOpen = false;
+    markOutcomeTrace(trace, "commit");
+    logOutcomeTrace(trace);
     return sendJson(res, 200, response);
   } catch (error) {
-    try { await client.query("rollback"); } catch (rollbackError) {}
-    throw error;
+    lastError = error;
+    releaseError = error;
+    if (client && transactionOpen && !committed) {
+      try {
+        await client.query("rollback");
+        markOutcomeTrace(trace, "rollback", { attempt });
+      } catch (rollbackError) {
+        markOutcomeTrace(trace, "rollback failed", { attempt, error: safeError(rollbackError) });
+      }
+    }
+    if (isRetryableDbTermination(error) && attempt < OUTCOME_MAX_ATTEMPTS) {
+      markOutcomeTrace(trace, "retrying after db termination", { attempt, error: safeError(error) });
+    } else {
+      logOutcomeTrace(trace, "error", { error: safeError(error), retryable: isRetryableDbTermination(error) });
+      throw error;
+    }
   } finally {
-    client.release();
+    if (client) client.release(releaseError || undefined);
+    markOutcomeTrace(trace, "client released", { attempt, discarded: Boolean(releaseError) });
   }
+  }
+  throw lastError || new Error("Booking outcome sync failed.");
 }
 
 module.exports = async function handler(req, res) {
@@ -364,6 +492,11 @@ module.exports = async function handler(req, res) {
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
     return await handleOutcome(req, res);
   } catch (error) {
-    return sendJson(res, 500, { ok: false, error: safeError(error) });
+    const retryable = isRetryableDbTermination(error);
+    return sendJson(res, retryable ? 503 : 500, {
+      ok: false,
+      retryable,
+      error: outcomeSafeError(error)
+    });
   }
 };
