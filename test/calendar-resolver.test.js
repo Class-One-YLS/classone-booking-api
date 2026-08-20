@@ -93,6 +93,75 @@ function testRecurringStartEnd() {
   assert.equal(cell(cells, "2026-08-10", "18:00"), undefined, "recurring class must not appear after endDate");
 }
 
+function testLastClassDateStopsFutureRecurringGeneration() {
+  const teacher = baseTeacher({
+    name: "Catherine Mu",
+    regularSlots: [{
+      id: "slot_catherine_ashton_monday_1700",
+      normalizedRecurringAssignmentId: "assignment_catherine_ashton_monday_1700",
+      day: "Monday",
+      time: "17:00",
+      locked: true,
+      studentId: "student_ashton",
+      studentName: "Ashton Tan Jiun Hong",
+      subject: "CN",
+      type: "regular class",
+      startDate: "2026-07-01",
+      endDate: "2026-07-27",
+      updatedAt: "2026-07-27T00:00:00.000Z"
+    }, {
+      id: "slot_catherine_open_monday_1700_after_ashton",
+      day: "Monday",
+      time: "17:00",
+      locked: false,
+      unavailable: false,
+      subject: "CN",
+      startDate: "2026-07-28",
+      updatedAt: "2026-07-27T00:00:00.000Z"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [{ id: "student_ashton", name: "Ashton Tan Jiun Hong" }],
+    bookings: [{
+      id: "old_future_deleted_tombstone",
+      teacherId: "teacher_peggy",
+      studentId: "student_ashton",
+      studentName: "Ashton Tan Jiun Hong",
+      subject: "CN",
+      type: "regular class",
+      date: "2026-08-03",
+      day: "Monday",
+      time: "17:00",
+      status: "deleted",
+      deleted: true,
+      archived: true,
+      sourceSlotId: "slot_catherine_ashton_monday_1700",
+      recurringSourceSlotId: "assignment_catherine_ashton_monday_1700",
+      updatedAt: "2026-07-27T00:00:00.000Z"
+    }, {
+      id: "explicit_trial_after_last_date",
+      teacherId: "teacher_peggy",
+      studentId: "student_other",
+      studentName: "Explicit One Off",
+      subject: "CN",
+      type: "trial class",
+      date: "2026-08-10",
+      day: "Monday",
+      time: "17:00",
+      status: "booked",
+      updatedAt: "2026-08-01T00:00:00.000Z"
+    }]
+  }, "2026-07-27", "2026-08-31");
+
+  assert.equal(cell(cells, "2026-07-27", "17:00")?.studentName, "Ashton Tan Jiun Hong", "lastClassDate is inclusive");
+  assert.equal(cell(cells, "2026-08-03", "17:00")?.studentName || "", "", "future deleted tombstone must not render Ashton");
+  assert.equal(cell(cells, "2026-08-03", "17:00")?.status, "available", "future cell should return to availability");
+  assert.equal(cell(cells, "2026-08-10", "17:00")?.studentName, "Explicit One Off", "explicit one-off booking after lastClassDate still displays");
+  assert.equal(cell(cells, "2026-08-17", "17:00")?.studentName || "", "", "post-end recurring class must not regenerate");
+  assert.equal(cell(cells, "2026-08-24", "17:00")?.studentName || "", "", "later post-end recurring class must not regenerate");
+}
+
 function testOneDateOverrideOnlyAffectsExactDate() {
   const teacher = baseTeacher({
     regularSlots: [{
@@ -1021,6 +1090,7 @@ function testPublicHolidayTeachingAsUsualTeacherIsExempt() {
 }
 
 testRecurringStartEnd();
+testLastClassDateStopsFutureRecurringGeneration();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
 testLeeShokYuongNgooiJunRecurringStaysBooked();

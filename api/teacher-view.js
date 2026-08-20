@@ -940,6 +940,7 @@ async function loadState(req, from, to) {
     if (!belongs) return false;
     const status = String(booking.status || "");
     const outcome = String(booking.outcome || booking.finalStatus || booking.classOutcome || booking.outcomeStatus || booking.businessStatus || "").toLowerCase();
+    if (isTruthyFlag(booking.deleted) && !["cancel", "cancelled", "canceled"].includes(outcome)) return false;
     if (status === "deleted" && !["cancel", "cancelled", "canceled"].includes(outcome)) return false;
     if (booking.source === "fixed_regular_snapshot") return true;
     return dateRangeMatches(booking.date, from, to);
