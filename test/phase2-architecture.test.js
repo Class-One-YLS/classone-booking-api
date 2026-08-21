@@ -64,6 +64,43 @@ function testRecurringAssignmentIdentityAllowsSameTeacherSameTimeDifferentDays()
   );
 }
 
+function testSameStudentMultipleRegularSlotsStayDistinct() {
+  const teacher = { id: "teacher_karen_lee", regularSlots: [] };
+  const student = { id: "student_multi_slot", name: "Multi Slot Student", regularSlots: [] };
+  const tuesday = normalizeRecurringAssignment({
+    teacherId: teacher.id,
+    studentId: student.id,
+    studentName: student.name,
+    day: "Tuesday",
+    time: "21:00",
+    subject: "CN",
+    sourceCollection: "regularSlots",
+    sourceSlotId: "student_slot_tuesday",
+    studentSlotId: "student_slot_tuesday",
+    startDate: "2026-08-18"
+  });
+  const wednesday = normalizeRecurringAssignment({
+    teacherId: teacher.id,
+    studentId: student.id,
+    studentName: student.name,
+    day: "Wednesday",
+    time: "21:00",
+    subject: "CN",
+    sourceCollection: "regularSlots",
+    sourceSlotId: "student_slot_wednesday",
+    studentSlotId: "student_slot_wednesday",
+    startDate: "2026-08-19"
+  });
+
+  assert.notEqual(tuesday.assignmentId, wednesday.assignmentId, "each student regular slot must have its own assignment id");
+  const state = { teachers: [teacher], students: [student], recurringAssignments: [] };
+  overlayRecurringAssignments(state, [tuesday, wednesday]);
+  assert.equal(state.teachers[0].regularSlots.filter(slot => slot.studentId === student.id).length, 2);
+  assert(state.teachers[0].regularSlots.some(slot => slot.day === "Tuesday" && slot.time === "21:00"));
+  assert(state.teachers[0].regularSlots.some(slot => slot.day === "Wednesday" && slot.time === "21:00"));
+  assert.equal(state.students[0].regularSlots.length, 2);
+}
+
 function testOverlayRecurringAssignmentsIsRecordLevel() {
   const state = {
     teachers: [{
@@ -134,6 +171,7 @@ function testOutcomePostSuccessRefreshUsesExistingRenderers() {
 }
 
 testRecurringAssignmentIdentityAllowsSameTeacherSameTimeDifferentDays();
+testSameStudentMultipleRegularSlotsStayDistinct();
 testOverlayRecurringAssignmentsIsRecordLevel();
 testDeltaSuccessPathsDoNotCallLegacySave();
 testMigratedEndpointConstantsAreEnabled();
