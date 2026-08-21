@@ -964,6 +964,9 @@ async function loadState(req, from, to) {
     data: {
       teachers: [safeTeacher],
       bookings: teacherBookings,
+      recurringAssignments: (Array.isArray(full.recurringAssignments) ? full.recurringAssignments : []).filter(assignment =>
+        assignment.teacherId === teacher.id && dateIntersects(assignment)
+      ),
       students,
       teacherStudentNotes: (full.teacherStudentNotes || []).filter(note => note.teacherId === teacher.id),
       publicHolidays: (full.publicHolidays || []).filter(holiday => {

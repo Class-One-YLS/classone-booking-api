@@ -138,6 +138,14 @@ function testOverlayRecurringAssignmentsIsRecordLevel() {
   const slots = state.teachers[0].regularSlots;
   assert(slots.some(slot => slot.day === "Tuesday" && slot.studentName === "Lucas Tzia"), "normalized Tuesday assignment should be added");
   assert(slots.some(slot => slot.day === "Thursday" && slot.studentName === "Another Student"), "legacy unrelated Thursday assignment should remain");
+  const normalizedSlot = slots.find(slot => slot.day === "Tuesday" && slot.studentName === "Lucas Tzia");
+  assert.equal(normalizedSlot.locked, true, "normalized student assignment should render as an occupied recurring class");
+  assert.equal(normalizedSlot.available, undefined, "composed recurring slot should not be converted into an open availability record");
+}
+
+function testLastClassDateDoesNotCreateAvailabilitySlots() {
+  assert(!frontend.includes('source: "teacher-overview-ended-regular"'), "last class date must not create replacement open availability slots");
+  assert(!frontend.includes("Open slot covered by extended regular class last date"), "last class date must not rewrite existing open slot ranges");
 }
 
 function testDeltaSuccessPathsDoNotCallLegacySave() {
@@ -173,6 +181,7 @@ function testOutcomePostSuccessRefreshUsesExistingRenderers() {
 testRecurringAssignmentIdentityAllowsSameTeacherSameTimeDifferentDays();
 testSameStudentMultipleRegularSlotsStayDistinct();
 testOverlayRecurringAssignmentsIsRecordLevel();
+testLastClassDateDoesNotCreateAvailabilitySlots();
 testDeltaSuccessPathsDoNotCallLegacySave();
 testMigratedEndpointConstantsAreEnabled();
 testOutcomePostSuccessRefreshUsesExistingRenderers();
