@@ -485,6 +485,8 @@ function activeSlotRecords(slots) {
 }
 
 function uniqueSlots(slots) {
+  // Kept in sync with lib/calendar-resolver.js's uniqueSlots: rank beats timestamp, so a locked
+  // class with a student can't be silently masked by a newer but lower-rank "open" record.
   const byTime = new Map();
   slots.forEach(slot => {
     if (isDeletedSlotRecord(slot)) return;
@@ -493,9 +495,13 @@ function uniqueSlots(slots) {
     const normalized = { ...slot, time };
     const key = `${normalized.date || ""}|${normalized.time}`;
     const existing = byTime.get(key);
-    const newer = bookingAmendmentTime(normalized) > bookingAmendmentTime(existing);
-    const sameTime = bookingAmendmentTime(normalized) === bookingAmendmentTime(existing);
-    if (!existing || newer || (sameTime && slotRank(normalized) > slotRank(existing))) byTime.set(key, normalized);
+    if (!existing) {
+      byTime.set(key, normalized);
+      return;
+    }
+    const rankDiff = slotRank(normalized) - slotRank(existing);
+    const better = rankDiff > 0 || (rankDiff === 0 && bookingAmendmentTime(normalized) >= bookingAmendmentTime(existing));
+    if (better) byTime.set(key, normalized);
   });
   return [...byTime.values()];
 }

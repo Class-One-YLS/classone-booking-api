@@ -215,6 +215,83 @@ function testStaleOpenOverrideDoesNotHideLockedRegularSlot() {
   assert.equal(cell(cells, "2026-07-16", "20:30").studentName, "Ngooi Jun");
 }
 
+function testNewerOpenRegularSlotDoesNotHideOlderLockedRegularSlot() {
+  // Regression test for 2026-08-25: releasing a reservation (or a bulk recurring-assignment
+  // backfill) can leave a second, plain "open" record in teacher.regularSlots at the exact same
+  // day/time as an already-booked locked class. Real incidents: Hoh Kar Yee Tuesday 18:00 (Saw
+  // Yik Xuan) via releaseFixedReservation(), and six Adelyneshia slots via the 2026-08-14
+  // recurring_assignments_v2 backfill. Because uniqueSlots() used to pick whichever record had the
+  // newest updatedAt with no regard for rank, the newer-but-empty "open" record silently hid the
+  // older, still-active locked class from both Weekly Timetable and Teacher View.
+  const teacher = baseTeacher({
+    name: "Hoh Kar Yee",
+    regularSlots: [{
+      id: "slot_saw_yik_xuan_tuesday_1800",
+      day: "Tuesday",
+      time: "18:00",
+      locked: true,
+      studentId: "student_saw_yik_xuan",
+      studentName: "Saw Yik Xuan",
+      subject: "BM",
+      type: "regular class",
+      startDate: "2026-08-25",
+      endDate: "",
+      source: "teacher-overview",
+      updatedAt: "2026-08-21T07:58:00.618Z"
+    }, {
+      id: "slot_stray_open_tuesday_1800",
+      day: "Tuesday",
+      time: "18:00",
+      locked: false,
+      unavailable: false,
+      subject: "BM",
+      startDate: "2026-08-21",
+      endDate: "",
+      source: "reservation-released",
+      updatedAt: "2026-08-21T08:43:33.046Z"
+    }]
+  });
+  const cells = resolve({ teachers: [teacher], bookings: [], students: [] }, "2026-08-25", "2026-08-25");
+  const resolved = cell(cells, "2026-08-25", "18:00");
+  assert.equal(resolved?.studentName, "Saw Yik Xuan", "a newer but lower-rank open record must not mask an older locked class");
+  assert.equal(resolved?.status, "booked");
+}
+
+function testExplicitOffRegularSlotStillSupersedesLockedRegularSlot() {
+  // Companion sanity check: rank still lets a genuine "unavailable/off" record win over a locked
+  // class at the same cell (e.g. setTeacherRecurringCellOff marking a slot OFF) -- the fix must not
+  // make locked classes permanently unremovable, only protect them from lower-rank "open" noise.
+  const teacher = baseTeacher({
+    name: "Hoh Kar Yee",
+    regularSlots: [{
+      id: "slot_locked_wednesday_1900",
+      day: "Wednesday",
+      time: "19:00",
+      locked: true,
+      studentName: "Some Student",
+      subject: "BM",
+      startDate: "2026-08-01",
+      endDate: "",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    }, {
+      id: "slot_off_wednesday_1900",
+      day: "Wednesday",
+      time: "19:00",
+      locked: false,
+      unavailable: true,
+      status: "off",
+      subject: "BM",
+      startDate: "2026-08-19",
+      endDate: "",
+      source: "teacher-overview-off",
+      updatedAt: "2026-08-19T00:00:00.000Z"
+    }]
+  });
+  const cells = resolve({ teachers: [teacher], bookings: [], students: [] }, "2026-08-19", "2026-08-19");
+  const resolved = cell(cells, "2026-08-19", "19:00");
+  assert.equal(resolved?.kind, "off", "explicit OFF must still be able to supersede a locked class");
+}
+
 function testLeeShokYuongNgooiJunRecurringStaysBooked() {
   const teacher = {
     id: "teacher_lee_shok_yuong",
@@ -1093,6 +1170,8 @@ testRecurringStartEnd();
 testLastClassDateStopsFutureRecurringGeneration();
 testOneDateOverrideOnlyAffectsExactDate();
 testStaleOpenOverrideDoesNotHideLockedRegularSlot();
+testNewerOpenRegularSlotDoesNotHideOlderLockedRegularSlot();
+testExplicitOffRegularSlotStillSupersedesLockedRegularSlot();
 testLeeShokYuongNgooiJunRecurringStaysBooked();
 testLatestBookingRecordWins();
 testStudentNotShowDisplaysLatestStatus();
