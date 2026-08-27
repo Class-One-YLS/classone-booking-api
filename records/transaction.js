@@ -14,7 +14,9 @@ const COLLECTION_TABLES = new Map([
   ["teacherLeaves", "collection"],
   ["publicHolidays", "collection"],
   ["teacherStudentNotes", "collection"],
-  ["teacherFeedback", "collection"]
+  ["teacherFeedback", "collection"],
+  ["users", "collection"],
+  ["roles", "collection"]
 ]);
 
 function normalizedEmail(value) {
@@ -51,6 +53,20 @@ function userCanWrite(state, email) {
   if (user.role === "master_admin") return true;
   const role = roleByName(state, user.role);
   return Array.isArray(role && role.permissions) && role.permissions.includes("save");
+}
+
+function userCanManageUsers(state, email) {
+  const users = Array.isArray(state && state.users) ? state.users : [];
+  if (!users.length && email === "master@classone.local") return true;
+  const user = users.find(item => normalizedEmail(item.email) === email && item.status !== "disabled");
+  if (!user) return false;
+  if (user.role === "master_admin") return true;
+  const role = roleByName(state, user.role);
+  return Array.isArray(role && role.permissions) && role.permissions.includes("user_management");
+}
+
+function usersOrRolesInRecords(records) {
+  return Boolean((records?.users || []).length || (records?.roles || []).length);
 }
 
 function cleanStatus(value) {
@@ -280,6 +296,9 @@ async function handleTransaction(req, res) {
   const email = verifiedSessionEmail(req, body);
   if (!userCanWrite(composed.data || {}, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to save records." });
+  }
+  if (usersOrRolesInRecords(records) && !userCanManageUsers(composed.data || {}, email)) {
+    return sendJson(res, 403, { ok: false, error: "Only master_admin can manage users and roles." });
   }
 
   const pool = getPool();

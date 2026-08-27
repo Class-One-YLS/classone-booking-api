@@ -89,14 +89,62 @@ function splitText(text, chunkSize = 350000) {
   return chunks.length ? chunks : [""];
 }
 
+// getManifest/getChunk used to call loadComposedState() + JSON.stringify() the *entire* app state
+// on every single chunk request. With ~350KB chunks and a multi-ten-MB composed state, a single
+// client "pull latest data" cycle downloads ~100-150 chunks -- which meant recomputing the whole
+// composed state (re-querying every booking/recurring-assignment/collection table and
+// re-serializing tens of MB of JSON) that many times over, for what should have been one
+// computation. That was the dominant cause of multi-minute sync lag reported 2026-08-27.
+//
+// getCachedComposedChunks() computes the chunk list once per (state_key, version) and caches it in
+// composed_state_chunk_cache, so only the first request for a given version pays the full
+// recomputation cost; every other chunk request (and every later poll that finds the same version)
+// reads back a small pre-split row instead. Cache writes are best-effort: if the cache read/write
+// itself fails for any reason, we fall back to recomputing so a request never fails purely because
+// of the cache.
+async function getCachedComposedChunks(sql, key) {
+  const row = await loadComposedState(key);
+  if (!row.data) return { row, chunks: null, version: 0 };
+  const version = Number(row.version || 0);
+  try {
+    const cached = await sql`
+      select chunk_index, chunk_data
+      from composed_state_chunk_cache
+      where state_key = ${key} and version = ${version}
+      order by chunk_index asc
+    `;
+    if (cached.length) {
+      const chunks = cached.map(item => item.chunk_data);
+      const contiguous = chunks.every((_, index) => cached[index].chunk_index === index);
+      if (contiguous) return { row, chunks, version };
+    }
+  } catch (cacheReadError) {
+    // fall through to recompute
+  }
+  const chunks = splitText(JSON.stringify(row.data || {}));
+  try {
+    const payload = JSON.stringify(chunks.map((chunk_data, chunk_index) => ({ chunk_index, chunk_data })));
+    await sql`delete from composed_state_chunk_cache where state_key = ${key} and version <> ${version}`;
+    await sql`
+      insert into composed_state_chunk_cache (state_key, version, chunk_index, chunk_data)
+      select ${key}, ${version}, (item ->> 'chunk_index')::integer, item ->> 'chunk_data'
+      from jsonb_array_elements(${payload}::jsonb) item
+      on conflict (state_key, version, chunk_index) do nothing
+    `;
+  } catch (cacheWriteError) {
+    // caching is an optimization, not a correctness requirement -- ignore failures here
+  }
+  return { row, chunks, version };
+}
+
 async function getManifest(req, res) {
   await ensureCoreTables();
+  const sql = getSql();
   const key = stateKey(req);
-  const row = await loadComposedState(key);
+  const { row, chunks } = await getCachedComposedChunks(sql, key);
   if (!row.data) {
     return sendJson(res, 200, { ok: true, key, empty: true, version: 0, totalChunks: 0, updatedAt: null, updatedBy: null });
   }
-  const chunks = splitText(JSON.stringify(row.data || {}));
   return sendJson(res, 200, {
     ok: true,
     key,
@@ -111,14 +159,13 @@ async function getManifest(req, res) {
 
 async function getChunk(req, res) {
   await ensureCoreTables();
+  const sql = getSql();
   const key = stateKey(req);
   const version = Number(req.query.version || 0);
   const index = Number(req.query.chunk || 0);
   if (!Number.isInteger(index) || index < 0) return sendJson(res, 400, { ok: false, error: "Invalid chunk index." });
-  const row = await loadComposedState(key);
-  const currentVersion = Number(row.version || 0);
+  const { row, chunks, version: currentVersion } = await getCachedComposedChunks(sql, key);
   if (!row.data || (version && version !== currentVersion)) return sendJson(res, 404, { ok: false, error: "Chunk not found." });
-  const chunks = splitText(JSON.stringify(row.data || {}));
   if (index >= chunks.length) return sendJson(res, 404, { ok: false, error: "Chunk not found." });
   return sendJson(res, 200, { ok: true, key, version: currentVersion, index, chunk: chunks[index], composed: true });
 }
