@@ -91,21 +91,37 @@ function splitText(text, chunkSize = 350000) {
 
 // getManifest/getChunk used to call loadComposedState() + JSON.stringify() the *entire* app state
 // on every single chunk request. With ~350KB chunks and a multi-ten-MB composed state, a single
-// client "pull latest data" cycle downloads ~100-150 chunks -- which meant recomputing the whole
+// client "pull latest data" cycle downloads ~150-170 chunks -- which meant recomputing the whole
 // composed state (re-querying every booking/recurring-assignment/collection table and
 // re-serializing tens of MB of JSON) that many times over, for what should have been one
 // computation. That was the dominant cause of multi-minute sync lag reported 2026-08-27.
 //
 // getCachedComposedChunks() computes the chunk list once per (state_key, version) and caches it in
-// composed_state_chunk_cache, so only the first request for a given version pays the full
-// recomputation cost; every other chunk request (and every later poll that finds the same version)
-// reads back a small pre-split row instead. Cache writes are best-effort: if the cache read/write
-// itself fails for any reason, we fall back to recomputing so a request never fails purely because
-// of the cache.
-async function getCachedComposedChunks(sql, key) {
-  const row = await loadComposedState(key);
-  if (!row.data) return { row, chunks: null, version: 0 };
-  const version = Number(row.version || 0);
+// composed_state_chunk_cache. The first pass at this (2026-08-27) still called loadComposedState()
+// -- which reads the full legacy app_state row plus every normalized table -- on every request just
+// to find the current version, so cache *hits* were still taking several seconds each and a full
+// chunked pull was still slow (reported again 2026-08-28). getCurrentVersionInfo() below answers
+// "what version are we on" from two small, indexed queries instead, so a cache hit no longer touches
+// the expensive composed-state read at all; loadComposedState() now runs only on an actual cache
+// miss (a new version nobody has requested chunks for yet). Cache writes are best-effort: if the
+// cache read/write itself fails for any reason, we fall back to recomputing so a request never fails
+// purely because of the cache.
+async function getCurrentVersionInfo(sql, key) {
+  const [systemRows, legacyRows] = await Promise.all([
+    sql`select version, updated_at from system_versions where state_key = ${key} limit 1`,
+    sql`select version, updated_at, updated_by from app_state where key = ${key} limit 1`
+  ]);
+  if (!legacyRows.length) return { exists: false, version: 0, updatedAt: null, updatedBy: null };
+  const systemVersion = systemRows.length ? Number(systemRows[0].version || 0) : 0;
+  const legacyVersion = Number(legacyRows[0].version || 0);
+  const version = Math.max(systemVersion, legacyVersion);
+  const updatedAt = systemVersion >= legacyVersion
+    ? (systemRows[0]?.updated_at || legacyRows[0].updated_at)
+    : (legacyRows[0].updated_at || systemRows[0]?.updated_at);
+  return { exists: true, version, updatedAt, updatedBy: legacyRows[0].updated_by || null };
+}
+
+async function readCachedChunks(sql, key, version) {
   try {
     const cached = await sql`
       select chunk_index, chunk_data
@@ -113,15 +129,16 @@ async function getCachedComposedChunks(sql, key) {
       where state_key = ${key} and version = ${version}
       order by chunk_index asc
     `;
-    if (cached.length) {
-      const chunks = cached.map(item => item.chunk_data);
-      const contiguous = chunks.every((_, index) => cached[index].chunk_index === index);
-      if (contiguous) return { row, chunks, version };
-    }
+    if (!cached.length) return null;
+    const chunks = cached.map(item => item.chunk_data);
+    const contiguous = chunks.every((_, index) => cached[index].chunk_index === index);
+    return contiguous ? chunks : null;
   } catch (cacheReadError) {
-    // fall through to recompute
+    return null;
   }
-  const chunks = splitText(JSON.stringify(row.data || {}));
+}
+
+async function writeCachedChunks(sql, key, version, chunks) {
   try {
     const payload = JSON.stringify(chunks.map((chunk_data, chunk_index) => ({ chunk_index, chunk_data })));
     await sql`delete from composed_state_chunk_cache where state_key = ${key} and version <> ${version}`;
@@ -134,6 +151,27 @@ async function getCachedComposedChunks(sql, key) {
   } catch (cacheWriteError) {
     // caching is an optimization, not a correctness requirement -- ignore failures here
   }
+}
+
+async function getCachedComposedChunks(sql, key) {
+  const info = await getCurrentVersionInfo(sql, key);
+  if (!info.exists) return { row: { data: null }, chunks: null, version: 0 };
+
+  const cachedChunks = await readCachedChunks(sql, key, info.version);
+  if (cachedChunks) {
+    return {
+      row: { data: {}, version: info.version, updatedAt: info.updatedAt, updatedBy: info.updatedBy },
+      chunks: cachedChunks,
+      version: info.version
+    };
+  }
+
+  // Cache miss: this is the only path that still pays the full composed-state cost.
+  const row = await loadComposedState(key);
+  if (!row.data) return { row, chunks: null, version: 0 };
+  const version = Number(row.version || 0);
+  const chunks = splitText(JSON.stringify(row.data || {}));
+  await writeCachedChunks(sql, key, version, chunks);
   return { row, chunks, version };
 }
 
