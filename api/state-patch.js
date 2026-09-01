@@ -174,6 +174,29 @@ function mergePatchIntoState(currentState = {}, patch = {}) {
   return merged;
 }
 
+// The client (logAction() in index.html) already strips the heavy "undo" snapshot off activity log
+// entries beyond the most recent UNDO_SNAPSHOT_RETENTION_COUNT (200) whenever IT creates a new entry,
+// but that only prunes whatever that one browser session happens to have loaded locally at the time.
+// It does nothing for entries other sessions/devices wrote, so undo bloat quietly re-accumulates over
+// time (measured 2026-09-01: 39.87MB of undo snapshots on 369 entries older than the newest 200, out
+// of a ~51MB total state -- the dominant cost of every full-state load, including sign-in). Doing the
+// same trim here, server-side, on every save guarantees it never re-accumulates regardless of which
+// client wrote the patch, so admins no longer need to remember to click "Clean Up Old Undo Data".
+// Text history (everything except .undo) is always kept; only the ability to undo very old entries is
+// removed, same as the manual cleanup button.
+const UNDO_SNAPSHOT_RETENTION_COUNT = 200;
+function trimActivityLogUndoHistory(activityLogs) {
+  const logs = Array.isArray(activityLogs) ? activityLogs : [];
+  if (logs.length <= UNDO_SNAPSHOT_RETENTION_COUNT) return logs;
+  const sortedByRecency = [...logs].sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+  const keepUndoIds = new Set(sortedByRecency.slice(0, UNDO_SNAPSHOT_RETENTION_COUNT).map(log => log?.id));
+  return logs.map(log => {
+    if (!log || !log.undo || keepUndoIds.has(log.id)) return log;
+    const { undo, ...withoutUndo } = log;
+    return withoutUndo;
+  });
+}
+
 function dateOnly(value) {
   return String(value || "").slice(0, 10);
 }
@@ -321,6 +344,7 @@ async function applyPatch(req, res) {
   }
 
   const merged = mergePatchIntoState(currentState, patch);
+  merged.activityLogs = trimActivityLogUndoHistory(merged.activityLogs);
   const regularSlotConflict = validatePatchedStudentRegularSlots(merged, patch, currentState);
   if (regularSlotConflict) {
     return sendJson(res, 409, {
