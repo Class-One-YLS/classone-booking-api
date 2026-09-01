@@ -500,6 +500,7 @@ async function loadComposedState(key = "production", options = {}) {
   const data = legacy.data ? { ...legacy.data } : null;
   if (!data) return { ...legacy, data, version: Math.max(legacy.version, normalized.systemVersion), normalized };
   data.bookings = mergeById(data.bookings, normalized.bookings, "id");
+  overlayRecurringAssignments(data, normalized.recurringAssignments);
   data.replacements = mergeById(data.replacements, normalized.replacements, "id");
   data.replacementCredits = mergeById(data.replacementCredits, normalized.replacementCredits, "id");
   data.activityLogs = trimActivityLogUndoHistory(
@@ -512,18 +513,6 @@ async function loadComposedState(key = "production", options = {}) {
     const idName = collectionName === "teacherLeaves" ? "id" : "id";
     data[collectionName] = mergeById(data[collectionName], records, idName);
   });
-  // Run this LAST, after the generic "teachers"/"students" whole-profile collection_records_v2 merge
-  // above. recurring_assignments_v2 is the authoritative per-slot source of truth for regular/override
-  // slots; overlaying it first (the previous order) meant a later whole-profile sync of a stale local
-  // teacher/student snapshot -- e.g. from a browser tab that still had the pre-edit regularSlots array
-  // loaded when it happened to save something else -- could silently overwrite an already-correct
-  // slot-level edit, because mergeById() replaces regularSlots wholesale with no recency comparison.
-  // Doing the per-slot overlay last means it always has the final say on individual slot state,
-  // regardless of what a bulk profile sync landed. See 2026-09-01 Afiyah Humaira / Karen Lee Thursday
-  // 16:30 incident: "End Regular Class" correctly wrote recurring_assignments_v2 (endDate 2026-08-28),
-  // but a later "teachers" collection sync reverted teacher.regularSlots back to the pre-edit state on
-  // every read, because overlayRecurringAssignments ran before that collection merge, not after it.
-  overlayRecurringAssignments(data, normalized.recurringAssignments);
   const version = Math.max(Number(legacy.version || 0), Number(normalized.systemVersion || 0));
   return {
     ...legacy,
