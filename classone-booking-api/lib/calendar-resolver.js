@@ -1,0 +1,1022 @@
+const {
+  bookingAmendmentTime,
+  isDeletedBooking,
+  normalizeClassStatus,
+  resolveBookingRecords
+} = require("./booking-resolution");
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function cleanTeacherName(value) {
+  return String(value || "").replace(/^\d{4}\s+/, "").replace(/\s+/g, " ").trim();
+}
+
+function cleanStudentName(value) {
+  return String(value || "").replace(/\s*\((?:BC|CN|BM|PK|SOK|PHONICS|CREATIVE MATHS)\)\s*$/ig, "").replace(/\s+/g, " ").trim();
+}
+
+function slug(value) {
+  return cleanTeacherName(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function dateOnly(value) {
+  return String(value || "").split("T")[0].split(" ")[0];
+}
+
+function rawTimePart(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.includes("T")) {
+    const match = text.match(/T(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (match) return `${match[1].padStart(2, "0")}:${match[2]}:${match[3] || "00"}`;
+  }
+  const ampm = text.match(/\b(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(AM|PM)\b/i);
+  if (ampm) {
+    let hour = Number(ampm[1]);
+    const minute = Number(ampm[2] || 0);
+    const second = Number(ampm[3] || 0);
+    const suffix = ampm[4].toUpperCase();
+    if (suffix === "PM" && hour !== 12) hour += 12;
+    if (suffix === "AM" && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+  }
+  const match = text.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (match) return `${match[1].padStart(2, "0")}:${match[2]}:${match[3] || "00"}`;
+  return "";
+}
+
+function timeFromTotalMinutes(total) {
+  let adjusted = Math.round(total / 30) * 30;
+  if (adjusted < 0) adjusted = 0;
+  if (adjusted >= 24 * 60) adjusted = (24 * 60) - 30;
+  return `${String(Math.floor(adjusted / 60)).padStart(2, "0")}:${String(adjusted % 60).padStart(2, "0")}`;
+}
+
+function normalizeTime(value) {
+  const text = String(value || "").trim();
+  const sheetDateTime = text.match(/^1899-12-\d{2}T(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (sheetDateTime) {
+    const total = (Number(sheetDateTime[1]) * 60) + Number(sheetDateTime[2]) + (Number(sheetDateTime[3] || 0) / 60) - (83 + (18 / 60));
+    return timeFromTotalMinutes(total);
+  }
+  const part = rawTimePart(value);
+  if (!part) return "";
+  const [hour, minute, second] = part.split(":").map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return "";
+  return timeFromTotalMinutes((hour * 60) + minute + (Number(second || 0) / 60));
+}
+
+function dateRangeMatches(value, from, to) {
+  const date = dateOnly(value);
+  return (!from || date >= from) && (!to || date <= to);
+}
+
+function parseISODate(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  return new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
+}
+
+function localISO(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dateOffsetISO(value, days) {
+  const date = parseISODate(value);
+  date.setDate(date.getDate() + days);
+  return localISO(date);
+}
+
+function dayName(dateISO) {
+  const date = parseISODate(dateISO);
+  return DAYS[(date.getDay() + 6) % 7];
+}
+
+const TERMINAL_DISPLAY_STATUSES = new Set(["cancelled", "student_not_show", "teacher_leave", "public_holiday", "completed"]);
+
+function occurrenceDurationMinutes(record) {
+  const duration = Number(record && (record.minutes || record.durationMinutes || record.duration || record.classMinutes) || 25);
+  return Number.isFinite(duration) && duration > 0 ? duration : 25;
+}
+
+function occurrenceEndTimeMs(record) {
+  const date = dateOnly(record && (record.date || record.occurrenceDate) || "");
+  const time = normalizeTime(record && (record.time || record.startTime) || "") || String(record && (record.time || record.startTime) || "").slice(0, 5);
+  const normalizedTime = String(time || "").match(/^\d{1,2}:\d{2}/) ? String(time).slice(0, 5) : "";
+  if (!date || !normalizedTime) return 0;
+  const startMs = Date.parse(`${date}T${normalizedTime}:00+08:00`);
+  if (!Number.isFinite(startMs)) return 0;
+  return startMs + occurrenceDurationMinutes(record) * 60 * 1000;
+}
+
+function occurrenceDisplayStatus(record, fallbackStatus = "booked", nowMs = Date.now()) {
+  let normalized = normalizeClassStatus(record) || normalizeClassStatus(fallbackStatus) || fallbackStatus || "";
+  const normalizedKey = String(normalized || "").trim().toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+  if (["active", "regular", "regular_class", "confirmed"].includes(normalizedKey)) normalized = "booked";
+  if (["available", "off", "deleted", "reserved"].includes(normalizedKey)) return normalizedKey;
+  if (TERMINAL_DISPLAY_STATUSES.has(normalized)) return normalized;
+  const endMs = occurrenceEndTimeMs(record);
+  if (endMs && endMs <= nowMs) return "completed";
+  return normalizeClassStatus(normalized) || normalized || "booked";
+}
+
+function datesBetween(from, to) {
+  const rows = [];
+  if (!from || !to) return rows;
+  for (let date = from; date <= to; date = dateOffsetISO(date, 1)) rows.push(date);
+  return rows;
+}
+
+function fixedSnapshotParts(booking) {
+  if ((booking && booking.source) !== "fixed_regular_snapshot") return null;
+  const match = String((booking && booking.id) || "").match(/^history_(teacher_.+?)_(\d{4}-\d{2}-\d{2})_(\d{2})_(\d{2})_/);
+  if (!match) return null;
+  return { teacherId: match[1], date: match[2], time: `${match[3]}:${match[4]}` };
+}
+
+function repairFixedSnapshotBooking(booking) {
+  const parts = fixedSnapshotParts(booking);
+  if (!parts) return booking;
+  return {
+    ...booking,
+    teacherId: booking.teacherId || parts.teacherId,
+    date: parts.date,
+    day: dayName(parts.date),
+    time: parts.time
+  };
+}
+
+function normalizeBookingsForTeacherView(bookings) {
+  const seenFixedSnapshotIds = new Set();
+  return (Array.isArray(bookings) ? bookings : [])
+    .map(booking => repairFixedSnapshotBooking(booking))
+    .filter(booking => !isPureDeletedOccurrenceRecord(booking))
+    .filter(booking => {
+      if ((booking.source || "") !== "fixed_regular_snapshot" || !booking.id) return true;
+      if (seenFixedSnapshotIds.has(booking.id)) return false;
+      seenFixedSnapshotIds.add(booking.id);
+      return true;
+    });
+}
+
+function findTeacher(state, options = {}) {
+  const rawTeacher = String(options.teacherId || options.teacher || "").trim();
+  if (!rawTeacher) return null;
+  const teachers = Array.isArray(state.teachers) ? state.teachers : [];
+  return teachers.find(teacher => teacher.id === rawTeacher)
+    || teachers.find(teacher => slug(teacher.name) === slug(rawTeacher))
+    || teachers.find(teacher => cleanTeacherName(teacher.name).toLowerCase() === cleanTeacherName(rawTeacher).toLowerCase())
+    || null;
+}
+
+function findStudent(state, studentId, studentName) {
+  const cleanName = cleanStudentName(studentName).toLowerCase();
+  const students = Array.isArray(state.students) ? state.students : [];
+  return students.find(student => studentId && String(student.id || "") === String(studentId))
+    || students.find(student => cleanName && cleanStudentName(student.name).toLowerCase() === cleanName)
+    || null;
+}
+
+function studentPackageClassCount(student) {
+  return Number(student?.packageClasses ?? student?.packageTotalClasses ?? student?.totalClasses ?? student?.packageTotalClass);
+}
+
+function lessonPay(teacher, state, studentId, studentName) {
+  if ((teacher.category || "freelance") === "micro_franchisee") {
+    const student = studentId ? findStudent(state, studentId, "") : null;
+    const amount = Number(student && student.packageAmount || 0);
+    const classes = studentPackageClassCount(student);
+    const share = Number(teacher.profitShare || 0) / 100;
+    return amount && classes && share ? (amount / classes) * share : 0;
+  }
+  return Number(teacher.rate || 0);
+}
+
+function activePolicyRule(state, date = "") {
+  return [...(state.policyRules || [])]
+    .filter(rule => rule.status !== "archived" && (!date || !rule.effectiveFrom || rule.effectiveFrom <= date))
+    .sort((a, b) => String(b.effectiveFrom || "").localeCompare(String(a.effectiveFrom || "")) || Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))[0] || {
+      notShowAllowance: 5
+    };
+}
+
+function notShowAllowance(state, date = "") {
+  return Number(activePolicyRule(state, date).notShowAllowance ?? 5);
+}
+
+function slotRank(slot) {
+  if (slot.unavailable) return 5;
+  if (slot.locked && slot.studentName) return 4;
+  if (slot.locked) return 3;
+  if (slot.source === "override") return 2;
+  return 1;
+}
+
+function isDeletedSlotRecord(slot) {
+  const status = String(slot && slot.status || "").toLowerCase();
+  return !slot ||
+    slot.deleted === true ||
+    slot.archived === true ||
+    slot.active === false ||
+    Boolean(slot.removedAt) ||
+    Boolean(slot.deletedAt) ||
+    status === "deleted" ||
+    status === "removed";
+}
+
+function slotSourceKey(slot) {
+  if (slot && slot.id) return `id:${slot.id}`;
+  return `cell:${slot && slot.teacherId || ""}|${slot && slot.day || ""}|${dateOnly(slot && slot.date || "")}|${normalizeTime(slot && slot.time) || slot && slot.time || ""}|${slot && slot.studentId || ""}|${cleanStudentName(slot && slot.studentName || "").toLowerCase()}|${slot && slot.subject || ""}|${dateOnly(slot && slot.startDate || "")}`;
+}
+
+function effectiveSlotRecords(slots) {
+  const byKey = new Map();
+  (Array.isArray(slots) ? slots : []).forEach(slot => {
+    if (!slot) return;
+    const key = slotSourceKey(slot);
+    const existing = byKey.get(key);
+    if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byKey.set(key, slot);
+  });
+  return [...byKey.values()];
+}
+
+function activeSlotRecords(slots) {
+  return effectiveSlotRecords(slots).filter(slot => !isDeletedSlotRecord(slot));
+}
+
+function uniqueSlots(slots) {
+  // REVERTED 2026-08-28: a rank-before-timestamp rule was tried here (see git history / the
+  // 2026-08-25 incident notes) to stop a stray lower-rank "open" record from masking an
+  // already-booked locked class purely by having a newer updatedAt. That fixed the reported case,
+  // but it broke the opposite, equally legitimate scenario: a slot is set OFF, and a genuinely
+  // newer locked class is later booked into the same cell -- rank-first kept the older OFF record
+  // winning forever, which hid Hoh Kar Yee / Lim Ren Jun's Friday 15:30 class (reported 2026-08-28).
+  // "Latest write wins" is the correct default for two competing deliberate actions on the same
+  // cell; the original masking bug is better addressed at the write source (e.g.
+  // releaseFixedReservation() now checks for an existing locked booking before reopening a slot)
+  // than by reordering this generic tiebreak.
+  const byTime = new Map();
+  slots.forEach(slot => {
+    if (isDeletedSlotRecord(slot)) return;
+    const time = normalizeTime(slot.time);
+    if (!time) return;
+    const normalized = { ...slot, time };
+    const key = `${normalized.date || ""}|${normalized.time}`;
+    const existing = byTime.get(key);
+    const newer = bookingAmendmentTime(normalized) > bookingAmendmentTime(existing);
+    const sameTime = bookingAmendmentTime(normalized) === bookingAmendmentTime(existing);
+    if (!existing || newer || (sameTime && slotRank(normalized) > slotRank(existing))) byTime.set(key, normalized);
+  });
+  return [...byTime.values()];
+}
+
+function bookingSlotKey(booking) {
+  const time = normalizeTime(booking && booking.time);
+  const date = dateOnly(booking && booking.date);
+  if (!booking || !booking.teacherId || !date || !time) return "";
+  return `${booking.teacherId}|${date}|${time}`;
+}
+
+function teacherDateTimeKey(teacherId, dateISO, time) {
+  return `${teacherId || ""}|${dateOnly(dateISO)}|${normalizeTime(time) || time || ""}`;
+}
+
+function recurringSourceSlotId(record) {
+  if (isMovedDestinationBooking(record)) return "";
+  const keySource = recurringSourceFromOccurrenceKey(record);
+  return record && (
+    record.normalizedRecurringAssignmentId ||
+    record.assignmentId ||
+    record.recurringAssignmentId ||
+    record.recurringSourceSlotId ||
+    record.sourceSlotId ||
+    record.recurringScheduleId ||
+    record.movedFromRecurringClassId ||
+    keySource
+  ) || "";
+}
+
+function recurringSourceFromOccurrenceKey(record) {
+  const values = [
+    record && record.sourceOccurrenceKey,
+    record && record.occurrenceKey,
+    String(record && record.sourceOccurrenceId || "").startsWith("occurrence:") ? String(record.sourceOccurrenceId).slice("occurrence:".length) : "",
+    String(record && record.occurrenceId || "").startsWith("occurrence:") ? String(record.occurrenceId).slice("occurrence:".length) : ""
+  ];
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text || !text.includes("|")) continue;
+    const [source, date] = text.split("|");
+    if (source && dateOnly(date)) return source;
+  }
+  return "";
+}
+
+function recurringSourceAliases(record) {
+  if (!record || isMovedDestinationBooking(record)) return [];
+  const keySource = recurringSourceFromOccurrenceKey(record);
+  return [...new Set([
+    record.normalizedRecurringAssignmentId,
+    record.assignmentId,
+    record.recurringAssignmentId,
+    record.recurringSourceSlotId,
+    record.sourceSlotId,
+    record.recurringScheduleId,
+    record.movedFromRecurringClassId,
+    keySource,
+    record.id
+  ].map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function isMoveSourceOutcomeBooking(record) {
+  return Boolean(record && (record.movedToBookingId || record.outcomeSource === "drag_move" || record.recordRole === "move_source"));
+}
+
+function isMovedDestinationBooking(record) {
+  const source = String(record && record.source || "").toLowerCase();
+  return Boolean(record && (
+    record.source === "moved_booking" ||
+    record.movedFromOccurrenceId ||
+    record.recordRole === "move_destination" ||
+    source.includes("moved") ||
+    source.includes("rescheduled") ||
+    source.includes("change_slot")
+  ) && !isMoveSourceOutcomeBooking(record));
+}
+
+function bookingRecordRole(record) {
+  if (isMoveSourceOutcomeBooking(record)) return "move_source";
+  if (isMovedDestinationBooking(record)) return "move_destination";
+  return record && (record.recordRole || record.source) || "booking";
+}
+
+function occurrenceKeyFromParts(sourceSlotId, date) {
+  const source = String(sourceSlotId || "").trim();
+  const dateStr = dateOnly(date);
+  return source && dateStr ? `${source}|${dateStr}` : "";
+}
+
+function occurrenceKeysFromAliases(aliases, date) {
+  const dateStr = dateOnly(date);
+  if (!dateStr) return [];
+  return [...new Set((aliases || []).map(source => occurrenceKeyFromParts(source, dateStr)).filter(Boolean))];
+}
+
+function occurrenceKeyForBooking(booking) {
+  return occurrenceKeyFromParts(recurringSourceSlotId(booking), booking && (booking.date || booking.occurrenceDate));
+}
+
+function occurrenceKeyForSlot(slot, dateStr) {
+  return occurrenceKeyFromParts(recurringSourceSlotId(slot) || (slot && (slot.id || slot.recurringScheduleId)), dateStr);
+}
+
+function occurrenceKeysForBooking(booking) {
+  return occurrenceKeysFromAliases(recurringSourceAliases(booking), booking && (booking.date || booking.occurrenceDate));
+}
+
+function occurrenceKeysForSlot(slot, dateStr) {
+  return occurrenceKeysFromAliases(recurringSourceAliases(slot), dateStr);
+}
+
+function recordsShareOccurrenceKey(booking, slot, dateStr) {
+  const bookingKeys = new Set(occurrenceKeysForBooking(booking));
+  return occurrenceKeysForSlot(slot, dateStr).some(key => bookingKeys.has(key));
+}
+
+function recordsShareStudentIdentity(booking, slot) {
+  if (!booking || !slot) return false;
+  const bookingStudentId = String(booking.studentId || "").trim();
+  const slotStudentId = String(slot.studentId || "").trim();
+  if (bookingStudentId && slotStudentId) return bookingStudentId === slotStudentId;
+  const bookingName = cleanStudentName(booking.studentName || booking.reservationName || "").toLowerCase();
+  const slotName = cleanStudentName(slot.studentName || slot.reservationName || "").toLowerCase();
+  return Boolean(bookingName && slotName && bookingName === slotName);
+}
+
+function recordsHaveDifferentStudentIdentity(booking, slot) {
+  if (!booking || !slot) return false;
+  const bookingStudentId = String(booking.studentId || "").trim();
+  const slotStudentId = String(slot.studentId || "").trim();
+  if (bookingStudentId && slotStudentId) return bookingStudentId !== slotStudentId;
+  const bookingName = cleanStudentName(booking.studentName || booking.reservationName || "").toLowerCase();
+  const slotName = cleanStudentName(slot.studentName || slot.reservationName || "").toLowerCase();
+  return Boolean(bookingName && slotName && bookingName !== slotName);
+}
+
+function occurrenceIdFromKey(key) {
+  return key ? `occurrence:${key}` : "";
+}
+
+function occurrenceIdForBooking(booking) {
+  if (!booking) return "";
+  if (isMovedDestinationBooking(booking)) return booking.id ? `booking:${booking.id}` : "";
+  const key = occurrenceKeyForBooking(booking);
+  if (key) return occurrenceIdFromKey(key);
+  return booking.id ? `booking:${booking.id}` : "";
+}
+
+function occurrenceIdForSlot(slot, dateStr = "") {
+  if (!slot) return "";
+  const date = dateOnly(dateStr || slot.date || slot.startDate);
+  const key = occurrenceKeyForSlot(slot, date);
+  if (slot.locked && key) return occurrenceIdFromKey(key);
+  const time = normalizeTime(slot.time) || slot.time || "";
+  if (slot.id) return `slot:${slot.id}|${date}|${time}`;
+  return teacherDateTimeKey(slot.teacherId, date, time);
+}
+
+function occurrenceResolutionStatus(booking) {
+  if (!booking) return "";
+  const status = normalizeClassStatus(booking) || booking.status || "";
+  if (status && status !== "deleted") return status;
+  const explicit = normalizeClassStatus(booking.resolutionStatus || booking.resolutionOutcome || booking.previousStatus || "");
+  if (explicit && explicit !== "deleted") return explicit;
+  if (booking.teacherLeaveId || booking.changedByTeacherLeave) return "teacher_leave";
+  if (booking.studentNotShowAt) return "student_not_show";
+  if (booking.cancelledAt || booking.outcomeSource === "admin_cancellation" || booking.replacementCreditCreated || booking.rebookedByBookingId || booking.supersededByBookingId) return "cancelled";
+  return status;
+}
+
+function occurrenceOutcomeParticipatesInResolution(booking) {
+  if (!booking || !occurrenceKeyForBooking(booking)) return false;
+  if (isMovedDestinationBooking(booking)) return false;
+  if (isPureDeletedOccurrenceRecord(booking)) return false;
+  if (booking.resolutionActive === true || booking.suppressRecurringOccurrence === true) return true;
+  const status = occurrenceResolutionStatus(booking);
+  return ["cancelled", "student_not_show", "teacher_leave", "public_holiday", "completed"].includes(status)
+    || Boolean(booking.movedToBookingId || isMoveSourceOutcomeBooking(booking));
+}
+
+function isSupersededBookingRecord(booking) {
+  return Boolean(booking && (booking.supersededByBookingId || booking.rebookedByBookingId || booking.superseded === true));
+}
+
+function isPureDeletedOccurrenceRecord(booking) {
+  if (!booking) return true;
+  const resolutionStatus = occurrenceResolutionStatus(booking);
+  if (resolutionStatus && resolutionStatus !== "deleted") return false;
+  return booking.deleted === true ||
+    booking.archived === true ||
+    booking.active === false ||
+    String(booking.status || "").toLowerCase() === "deleted" ||
+    normalizeClassStatus(booking) === "deleted";
+}
+
+function resolutionBookingRecord(booking) {
+  if (!occurrenceOutcomeParticipatesInResolution(booking)) return booking;
+  const wasSupersededForResolution = isSupersededBookingRecord(booking);
+  return {
+    ...booking,
+    recurringSourceSlotId: recurringSourceSlotId(booking),
+    occurrenceDate: dateOnly(booking.date || booking.occurrenceDate),
+    occurrenceKey: occurrenceKeyForBooking(booking),
+    suppressRecurringOccurrence: true,
+    resolutionActive: true,
+    resolutionStatus: occurrenceResolutionStatus(booking),
+    _wasSupersededForResolution: wasSupersededForResolution,
+    supersededByBookingId: "",
+    rebookedByBookingId: "",
+    superseded: false
+  };
+}
+
+function isDisplayableBookingRecord(booking) {
+  return Boolean(booking) && !isPureDeletedOccurrenceRecord(booking);
+}
+
+function isHistoricalInactiveBookingRecord(booking) {
+  const status = occurrenceResolutionStatus(booking) || normalizeClassStatus(booking) || String(booking && booking.status || "").toLowerCase();
+  return ["cancelled", "public_holiday", "teacher_leave", "off", "available"].includes(status);
+}
+
+function inactiveBookingCanYieldToActiveSlot(booking, slot) {
+  if (!booking || !slot || !slotIsActiveOccurrence(slot) || !isHistoricalInactiveBookingRecord(booking)) return false;
+  if (isSupersededBookingRecord(booking) || booking._wasSupersededForResolution === true) return true;
+  const sameCell = Boolean(
+    booking.teacherId && slot.teacherId && booking.teacherId === slot.teacherId &&
+    dateOnly(booking.date || "") && dateOnly(booking.date) === dateOnly(slot.date || "") &&
+    normalizeTime(booking.time) === normalizeTime(slot.time)
+  );
+  if (sameCell && recordsShareStudentIdentity(booking, slot)) return false;
+  const dateStr = dateOnly(booking.date || slot.date);
+  if (recordsShareOccurrenceKey(booking, slot, dateStr)) return false;
+  const bookingOccurrenceKey = occurrenceKeyForBooking(booking);
+  const slotOccurrenceKey = occurrenceKeyForSlot(slot, dateStr);
+  if (bookingOccurrenceKey && slotOccurrenceKey) return recordsHaveDifferentStudentIdentity(booking, slot) && !recordsShareStudentIdentity(booking, slot);
+  return recordsHaveDifferentStudentIdentity(booking, slot) && !recordsShareStudentIdentity(booking, slot);
+}
+
+function slotIsActiveOccurrence(slot) {
+  return Boolean(slot && !slot.unavailable && (slot.locked || slot.reserved || slot.studentName || slot.studentId));
+}
+
+function slotAppliesOnDate(slot, dateISO, day) {
+  if (isDeletedSlotRecord(slot)) return false;
+  if (slot.date) return dateOnly(slot.date) === dateISO;
+  return slot.day === day &&
+    (!slot.startDate || dateOnly(slot.startDate) <= dateISO) &&
+    (!slot.endDate || dateOnly(slot.endDate) >= dateISO);
+}
+
+function latestOverridesForDate(teacher, dateISO, day) {
+  const byCell = new Map();
+  activeSlotRecords(teacher.overrideSlots)
+    .filter(slot => slotAppliesOnDate(slot, dateISO, day))
+    .map(slot => ({ ...slot, time: normalizeTime(slot.time) }))
+    .filter(slot => slot.time)
+    .forEach(slot => {
+      const key = teacherDateTimeKey(teacher.id, dateISO, slot.time);
+      slot._cellKey = key;
+      const existing = byCell.get(key);
+      if (!existing || bookingAmendmentTime(slot) >= bookingAmendmentTime(existing)) byCell.set(key, slot);
+    });
+  return byCell;
+}
+
+function overrideSupersedesRegularSlot(override, regularSlot) {
+  if (!override) return false;
+  if (!regularSlot) return true;
+  const overrideTime = bookingAmendmentTime(override);
+  const regularTime = bookingAmendmentTime(regularSlot);
+  if (regularSlot.locked && !override.locked && !override.unavailable && !override.studentName) return false;
+  return overrideTime >= regularTime;
+}
+
+function collectTeacherSlotsForDate(teacher, dateISO, occurrenceOutcomes = new Map()) {
+  const day = dayName(dateISO);
+  const latestOverrides = latestOverridesForDate(teacher, dateISO, day);
+  const keptRegularKeys = new Set();
+  const regular = activeSlotRecords(teacher.regularSlots)
+    .filter(slot => slot.day === day)
+    .filter(slot => (!slot.startDate || dateOnly(slot.startDate) <= dateISO) && (!slot.endDate || dateOnly(slot.endDate) >= dateISO))
+    .map(slot => ({ ...slot, date: dateISO, source: slot.source || "regular", time: normalizeTime(slot.time) }))
+    .filter(slot => {
+      const occurrence = occurrenceKeysForSlot(slot, dateISO).map(key => occurrenceOutcomes.get(key)).find(Boolean);
+      if (occurrence && (occurrence.suppressRecurringOccurrence === true || occurrenceOutcomeParticipatesInResolution(occurrence))) return false;
+      const key = teacherDateTimeKey(teacher.id, dateISO, slot.time);
+      const keep = !overrideSupersedesRegularSlot(latestOverrides.get(key), slot);
+      if (keep) keptRegularKeys.add(key);
+      return keep;
+    });
+  const overrides = [...latestOverrides.values()]
+    .filter(slot => !keptRegularKeys.has(slot._cellKey || teacherDateTimeKey(teacher.id, dateISO, slot.time)))
+    .map(slot => ({ ...slot, date: dateISO, day, source: "override", time: normalizeTime(slot.time) }));
+  return uniqueSlots([...regular, ...overrides]);
+}
+
+function teacherLeaveForSlot(state, teacherId, date, time) {
+  const targetTime = normalizeTime(time) || time;
+  return (state.teacherLeaves || []).find(leave =>
+    !["cancelled", "undone"].includes(leave.status || "active") &&
+    leave.teacherId === teacherId &&
+    leave.startDate <= date &&
+    leave.endDate >= date &&
+    Number(normalizeTime(leave.fromTime).replace(":", "")) <= Number(targetTime.replace(":", "")) &&
+    Number(targetTime.replace(":", "")) <= Number(normalizeTime(leave.toTime).replace(":", ""))
+  ) || null;
+}
+
+function holidayStartDate(holiday) {
+  return dateOnly(holiday && (holiday.startDate || holiday.date));
+}
+
+function holidayEndDate(holiday) {
+  return dateOnly(holiday && (holiday.endDate || holiday.date || holiday.startDate));
+}
+
+function dateIsWithinHoliday(date, holiday) {
+  const target = dateOnly(date);
+  const start = holidayStartDate(holiday);
+  const end = holidayEndDate(holiday);
+  return Boolean(target && start && end && target >= start && target <= end);
+}
+
+function publicHolidayTeacherIds(holiday) {
+  return new Set([
+    ...((holiday && holiday.teachingAsUsualTeacherIds) || []),
+    ...((holiday && holiday.workingTeacherIds) || []),
+    ...((holiday && holiday.teacherExceptions) || [])
+  ].filter(Boolean));
+}
+
+function activePublicHolidayForTeacherDate(state, teacherId, date) {
+  const dateISO = dateOnly(date);
+  if (!dateISO) return null;
+  return [...(state.publicHolidays || [])]
+    .filter(holiday => !["deleted", "removed", "archived"].includes(String(holiday.status || "").toLowerCase()) && holiday.deleted !== true)
+    .filter(holiday => dateIsWithinHoliday(dateISO, holiday))
+    .filter(holiday => !publicHolidayTeacherIds(holiday).has(teacherId))
+    .sort((a, b) => bookingAmendmentTime(b) - bookingAmendmentTime(a))[0] || null;
+}
+
+function isRegularClassType(type) {
+  const normalized = String(type || "regular class").trim().toLowerCase().replace(/[_-]+/g, " ");
+  if (!normalized) return true;
+  if (/\b(assessment|trial|replacement|exam|extra|practical|reserve|one off|oneoff|special)\b/.test(normalized)) return false;
+  if (/\b(open|off|unavailable|teacher leave|public holiday|holiday)\b/.test(normalized)) return false;
+  return true;
+}
+
+function publicHolidayAffectsCell(cell, holiday) {
+  if (!cell || !holiday || publicHolidayTeacherIds(holiday).has(cell.teacherId)) return false;
+  if (cell.status === "teacher_leave" || cell.teacherLeaveId) return false;
+  if (cell.kind === "off" || cell.status === "off" || cell.unavailable) return false;
+  if (cell.kind === "open" || cell.available) return true;
+  if (cell.kind === "fixed" || cell.kind === "booking" || cell.locked || cell.studentName) {
+    const status = normalizeClassStatus(cell.status) || cell.status || "";
+    if (["cancelled", "student_not_show", "teacher_leave"].includes(status)) return false;
+    return isRegularClassType(cell.type);
+  }
+  return false;
+}
+
+function publicHolidayCellFromCell(cell, holiday, teacher) {
+  if (!publicHolidayAffectsCell(cell, holiday)) return cell;
+  const base = {
+    ...cell,
+    status: "public_holiday",
+    publicHolidayId: holiday.id || "",
+    holidayName: holiday.name || "Public Holiday",
+    remark: [cell.remark, holiday.name || "Public Holiday"].filter(Boolean).join("\n"),
+    updatedAt: holiday.updatedAt || holiday.createdAt || cell.updatedAt || "",
+    resolvedAt: new Date().toISOString(),
+    estimatedPay: 0
+  };
+  if (cell.kind === "open" || cell.available) {
+    return {
+      ...base,
+      status: "public_holiday",
+      kind: "off",
+      type: "public holiday",
+      reason: "public_holiday",
+      studentId: "",
+      studentName: "",
+      locked: true,
+      unavailable: true,
+      available: false,
+      source: "public_holiday"
+    };
+  }
+  return {
+    ...base,
+    kind: cell.kind === "booking" ? "booking" : "fixed",
+    type: cell.type || "regular class",
+    locked: true,
+    unavailable: false,
+    available: false,
+    teacherName: cell.teacherName || teacher.name || ""
+  };
+}
+
+function resolvePublicHolidayCell(state, cell, teacher) {
+  if (!cell) return cell;
+  const holiday = activePublicHolidayForTeacherDate(state, cell.teacherId || teacher.id, cell.date);
+  return publicHolidayCellFromCell(cell, holiday, teacher);
+}
+
+function teacherLeavePseudoBooking(slot, leave) {
+  return {
+    id: `leave_${leave.id}_${slot.date}_${slot.time}`,
+    teacherId: slot.teacherId,
+    teacherLeaveId: leave.id,
+    date: slot.date,
+    day: slot.day || dayName(slot.date),
+    time: slot.time,
+    subject: slot.subject || "",
+    studentName: "Teacher Leave",
+    type: "teacher leave",
+    status: "teacher_leave",
+    remark: leave.remark || "",
+    source: "teacher_leave_record",
+    updatedAt: leave.updatedAt || leave.createdAt || "",
+    slotRevisionAt: leave.updatedAt || leave.createdAt || "",
+    createdAt: leave.createdAt || ""
+  };
+}
+
+function teacherLeaveOffSlotFromCell(slot, leave) {
+  const teacherId = slot.teacherId || leave.teacherId;
+  const date = dateOnly(slot.date || leave.startDate);
+  const time = normalizeTime(slot.time);
+  return {
+    id: `teacher_leave_off_${leave.id}_${teacherId}_${date}_${time}`.replace(/[^a-zA-Z0-9_-]/g, "_"),
+    teacherId,
+    date,
+    day: slot.day || dayName(date),
+    time,
+    subject: slot.subject || "",
+    unavailable: true,
+    status: "teacher_leave",
+    source: "teacher_leave",
+    teacherLeaveId: leave.id,
+    previousKind: slot.kind || "open",
+    previousStatus: slot.status || "available",
+    remark: leave.reason || leave.remark || "Teacher on leave",
+    createdAt: leave.createdAt || leave.updatedAt || "",
+    updatedAt: leave.updatedAt || leave.createdAt || "",
+    createdBy: leave.createdBy || "",
+    updatedBy: leave.updatedBy || "",
+    deviceId: leave.deviceId || ""
+  };
+}
+
+function publicCellFromBooking(booking, teacher, state, nowMs = Date.now()) {
+  const status = occurrenceDisplayStatus(booking, occurrenceResolutionStatus(booking) || normalizeClassStatus(booking) || booking.status || "booked", nowMs);
+  const date = dateOnly(booking.date);
+  const time = normalizeTime(booking.time);
+  const recurringScheduleId = booking.normalizedRecurringAssignmentId ||
+    booking.assignmentId ||
+    booking.recurringAssignmentId ||
+    booking.recurringSourceSlotId ||
+    booking.recurringScheduleId ||
+    booking.sourceSlotId ||
+    "";
+  return {
+    cellKey: `${booking.teacherId || teacher.id}|${date}|${time}`,
+    kind: "booking",
+    id: booking.id,
+    bookingId: booking.id,
+    recordId: booking.id,
+    occurrenceId: occurrenceIdForBooking(booking),
+    occurrenceKey: occurrenceKeyForBooking(booking),
+    recordRole: bookingRecordRole(booking),
+    moveTransactionId: booking.moveTransactionId || "",
+    recurringScheduleId,
+    sourceRecordId: booking.id,
+    teacherId: booking.teacherId || teacher.id,
+    teacherName: teacher.name || "",
+    slotId: booking.sourceSlotId || "",
+    sourceSlotId: booking.sourceSlotId || "",
+    normalizedRecurringAssignmentId: booking.normalizedRecurringAssignmentId || "",
+    assignmentId: booking.assignmentId || "",
+    recurringAssignmentId: booking.recurringAssignmentId || "",
+    recurringSourceSlotId: booking.recurringSourceSlotId || recurringScheduleId,
+    studentId: booking.studentId || "",
+    loadedFrom: "neon.app_state.bookings",
+    date,
+    day: booking.day || dayName(date),
+    time,
+    studentName: cleanStudentName(booking.studentName || ""),
+    subject: booking.subject || "",
+    type: booking.type || "regular class",
+    status,
+    minutes: Number(booking.minutes || 25),
+    remark: booking.remark || "",
+    locked: true,
+    available: false,
+    source: booking.source || "booking",
+    updatedAt: booking.updatedAt || booking.updated_at || "",
+    slotRevisionAt: booking.slotRevisionAt || "",
+    statusChangedAt: booking.statusChangedAt || "",
+    changedAt: booking.changedAt || "",
+    changedSlot: booking.changedSlot || null,
+    rebookedAt: booking.rebookedAt || "",
+    cancelledAt: booking.cancelledAt || "",
+    completedAt: booking.completedAt || "",
+    finalizedAt: booking.finalizedAt || "",
+    studentNotShowAt: booking.studentNotShowAt || "",
+    supersededAt: booking.supersededAt || "",
+    deletedAt: booking.deletedAt || "",
+    createdAt: booking.createdAt || booking.created_at || "",
+    resolvedAt: new Date().toISOString(),
+    estimatedPay: status === "student_not_show" ? notShowAllowance(state, dateOnly(booking.date)) : lessonPay(teacher, state, booking.studentId || "", booking.studentName || "")
+  };
+}
+
+function publicCellFromSlot(slot, teacher, state, nowMs = Date.now()) {
+  const date = dateOnly(slot.date);
+  const time = normalizeTime(slot.time);
+  const recurringScheduleId = slot.normalizedRecurringAssignmentId ||
+    slot.assignmentId ||
+    slot.recurringAssignmentId ||
+    slot.recurringSourceSlotId ||
+    slot.recurringScheduleId ||
+    slot.id ||
+    "";
+  if (slot.reserved) {
+    return {
+      cellKey: `${teacher.id}|${date}|${time}`,
+      kind: "reserved",
+      id: slot.id || "",
+      bookingId: "",
+      recordId: slot.id || "",
+      occurrenceId: occurrenceIdForSlot(slot, date),
+      occurrenceKey: occurrenceKeyForSlot(slot, date),
+      recurringScheduleId,
+      slotId: slot.id || "",
+      sourceSlotId: slot.sourceSlotId || slot.id || "",
+      normalizedRecurringAssignmentId: slot.normalizedRecurringAssignmentId || "",
+      assignmentId: slot.assignmentId || "",
+      recurringAssignmentId: slot.recurringAssignmentId || "",
+      recurringSourceSlotId: slot.recurringSourceSlotId || recurringScheduleId,
+      sourceRecordId: slot.id || "",
+      teacherId: teacher.id,
+      teacherName: teacher.name || "",
+      date,
+      day: slot.day || dayName(date),
+      time,
+      studentId: slot.studentId || "",
+      studentName: cleanStudentName(slot.reservationName || slot.studentName || ""),
+      subject: slot.subject || "",
+      type: "reserve",
+      status: "reserved",
+      locked: true,
+      available: false,
+      source: slot.source || "teacher-overview-reservation",
+      remark: slot.remark || "",
+      minutes: 25,
+      resolvedAt: new Date().toISOString(),
+      estimatedPay: 0
+    };
+  }
+  const leaveUnavailable = Boolean(slot.unavailable && (slot.status === "teacher_leave" || slot.teacherLeaveId));
+  const locked = Boolean(slot.locked || leaveUnavailable);
+  const unavailableStatus = slot.unavailable ? (slot.status || "off") : "";
+  const status = slot.unavailable ? unavailableStatus : (slot.locked ? occurrenceDisplayStatus({ ...slot, status: slot.status || "booked" }, "booked", nowMs) : "available");
+  return {
+    cellKey: `${teacher.id}|${date}|${time}`,
+    kind: slot.unavailable ? "off" : (slot.locked ? "fixed" : "open"),
+    id: slot.id || "",
+    bookingId: "",
+    recordId: slot.id || "",
+    occurrenceId: occurrenceIdForSlot(slot, date),
+    occurrenceKey: occurrenceKeyForSlot(slot, date),
+    recurringScheduleId,
+    slotId: slot.id || "",
+    sourceSlotId: slot.sourceSlotId || slot.id || "",
+    normalizedRecurringAssignmentId: slot.normalizedRecurringAssignmentId || "",
+    assignmentId: slot.assignmentId || "",
+    recurringAssignmentId: slot.recurringAssignmentId || "",
+    recurringSourceSlotId: slot.recurringSourceSlotId || recurringScheduleId,
+    sourceRecordId: slot.id || "",
+    teacherId: teacher.id,
+    teacherName: teacher.name,
+    date,
+    day: slot.day || dayName(date),
+    time,
+    studentId: slot.studentId || "",
+    studentName: cleanStudentName(slot.studentName || ""),
+    subject: slot.subject || "",
+    type: slot.unavailable ? (unavailableStatus === "teacher_leave" ? "teacher leave" : "off") : (slot.locked ? "regular class" : "open slot"),
+    status,
+    teacherLeaveId: slot.teacherLeaveId || "",
+    locked,
+    unavailable: Boolean(slot.unavailable),
+    available: !locked && !slot.unavailable,
+    minutes: 25,
+    source: slot.source || "",
+    remark: slot.remark || "",
+    createdAt: slot.createdAt || "",
+    updatedAt: slot.updatedAt || slot.slotRevisionAt || "",
+    resolvedAt: new Date().toISOString(),
+    estimatedPay: slot.locked ? lessonPay(teacher, state, slot.studentId || "", slot.studentName || "") : 0
+  };
+}
+
+function resolveTeacherCalendar(state, options = {}) {
+  const teacher = options.teacher || findTeacher(state, { teacherId: options.teacherId, teacher: options.teacherName });
+  const from = dateOnly(options.from);
+  const to = dateOnly(options.to);
+  const displayNowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+  if (!teacher || !from || !to) {
+    return { teacherId: options.teacherId || "", from, to, generatedAt: new Date().toISOString(), stateVersion: Number(options.stateVersion || 0), cells: [] };
+  }
+  const rawBookings = normalizeBookingsForTeacherView(state.bookings)
+    .filter(booking => booking.teacherId === teacher.id)
+    .filter(booking => dateRangeMatches(booking.date, from, to));
+  const normalizedBookings = rawBookings
+    .map(booking => ({ ...booking, date: dateOnly(booking.date), time: normalizeTime(booking.time) }))
+    .filter(booking => bookingSlotKey(booking))
+    .map(resolutionBookingRecord);
+  const occurrenceOutcomes = new Map();
+  normalizedBookings
+    .filter(occurrenceOutcomeParticipatesInResolution)
+    .forEach(booking => {
+      occurrenceKeysForBooking(booking).forEach(key => {
+        const existing = occurrenceOutcomes.get(key);
+        if (!existing || bookingAmendmentTime(booking) >= bookingAmendmentTime(existing)) occurrenceOutcomes.set(key, booking);
+      });
+    });
+  const resolution = resolveBookingRecords(normalizedBookings, bookingSlotKey);
+  const rows = [];
+  datesBetween(from, to).forEach(dateISO => {
+    const slots = collectTeacherSlotsForDate(teacher, dateISO, occurrenceOutcomes);
+    const slotByTime = new Map(slots.map(slot => [normalizeTime(slot.time), slot]));
+    const bookingByTime = new Map();
+    resolution.winners.forEach((booking, key) => {
+      if (dateOnly(booking.date) === dateISO) bookingByTime.set(normalizeTime(booking.time), { booking, key });
+    });
+    const times = new Set([...slotByTime.keys(), ...bookingByTime.keys()]);
+    times.forEach(time => {
+      const resolved = bookingByTime.get(time);
+      const booking = resolved && resolved.booking;
+      const slot = slotByTime.get(time);
+      const pushResolvedCell = (cell) => {
+        const finalCell = resolvePublicHolidayCell(state, cell, teacher);
+        if (finalCell) rows.push(finalCell);
+      };
+      if (slot && slot.unavailable && (!booking || bookingAmendmentTime(slot) >= bookingAmendmentTime(booking))) {
+        pushResolvedCell(publicCellFromSlot(slot, teacher, state, displayNowMs));
+        return;
+      }
+      if (booking && inactiveBookingCanYieldToActiveSlot(booking, slot)) {
+        pushResolvedCell(publicCellFromSlot(slot, teacher, state, displayNowMs));
+        return;
+      }
+      if (booking) {
+        if (isDeletedBooking(booking)) {
+          if (isDisplayableBookingRecord(booking)) {
+            pushResolvedCell(publicCellFromBooking(booking, teacher, state, displayNowMs));
+            return;
+          }
+          if (slot && (!slot.locked || slot.unavailable) && !slot.reserved) pushResolvedCell(publicCellFromSlot(slot, teacher, state, displayNowMs));
+          return;
+        }
+        pushResolvedCell(publicCellFromBooking(booking, teacher, state, displayNowMs));
+      } else if (slot) {
+        const leave = teacherLeaveForSlot(state, teacher.id, dateISO, time);
+        if (leave) {
+          pushResolvedCell(publicCellFromSlot(teacherLeaveOffSlotFromCell(slot, leave), teacher, state, displayNowMs));
+          return;
+        }
+        pushResolvedCell(publicCellFromSlot(slot, teacher, state, displayNowMs));
+      }
+    });
+  });
+  return {
+    teacherId: teacher.id,
+    from,
+    to,
+    generatedAt: new Date().toISOString(),
+    stateVersion: Number(options.stateVersion || 0),
+    cells: rows
+      .filter(cell => cell.time)
+      .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`))
+  };
+}
+
+function resolveOccurrences(state, options = {}) {
+  return resolveTeacherCalendar(state, options);
+}
+
+function bookingDebugRecord(booking, selected = false, reason = "") {
+  return {
+    sourceRecordId: booking.id || "",
+    teacherId: booking.teacherId || "",
+    studentId: booking.studentId || "",
+    bookingId: booking.id || "",
+    studentName: booking.studentName || "",
+    status: booking.status || "booked",
+    normalizedStatus: normalizeClassStatus(booking) || booking.status || "booked",
+    outcome: booking.outcome || booking.classOutcome || booking.finalStatus || "",
+    classType: booking.type || "regular class",
+    createdAt: booking.createdAt || booking.created_at || "",
+    updatedAt: booking.updatedAt || booking.updated_at || "",
+    slotRevisionAt: booking.slotRevisionAt || "",
+    statusChangedAt: booking.statusChangedAt || "",
+    amendmentTime: bookingAmendmentTime(booking),
+    loadedFrom: "neon.app_state.bookings",
+    selectedWinner: selected,
+    reason
+  };
+}
+
+function bookingResolutionDiagnostics(bookings) {
+  const normalized = (Array.isArray(bookings) ? bookings : [])
+    .map(booking => ({ ...booking, date: dateOnly(booking.date), time: normalizeTime(booking.time) }))
+    .filter(booking => bookingSlotKey(booking));
+  const resolution = resolveBookingRecords(normalized, bookingSlotKey);
+  return [...resolution.traces.entries()]
+    .filter(([, trace]) => trace.length > 1 || trace.some(item => !item.selected))
+    .map(([slotKey, trace]) => {
+      const winner = resolution.winners.get(slotKey);
+      return {
+        slotKey,
+        records: trace.map(item => bookingDebugRecord(item.booking, item.booking === winner, item.reason)),
+        selectedWinner: winner ? bookingDebugRecord(winner, true, "canonical winner") : null
+      };
+    });
+}
+
+module.exports = {
+  DAYS,
+  bookingResolutionDiagnostics,
+  bookingSlotKey,
+  cleanStudentName,
+  cleanTeacherName,
+  collectTeacherSlotsForDate,
+  dateOnly,
+  dayName,
+  normalizeBookingsForTeacherView,
+  normalizeTime,
+  occurrenceIdForBooking,
+  occurrenceIdForSlot,
+  occurrenceKeyForBooking,
+  occurrenceKeyForSlot,
+  occurrenceKeysForBooking,
+  occurrenceKeysForSlot,
+  publicCellFromBooking,
+  publicCellFromSlot,
+  resolveOccurrences,
+  resolveTeacherCalendar,
+  teacherDateTimeKey
+};
