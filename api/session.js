@@ -32,10 +32,15 @@ async function login(req, res) {
   const password = String(body.password || "");
   if (!email) return sendJson(res, 400, { ok: false, error: "Email is required." });
 
+  // Login only needs the users array to check credentials, but app_state.data is one JSONB blob
+  // holding the entire app state (activity logs, bookings, etc.) — currently 50MB+. Selecting the
+  // whole column on every sign-in attempt pulls all of that over the wire and JSON-parses it just to
+  // read a few user records, which is slow and burns Neon data-transfer for nothing. Extracting the
+  // "users" path in SQL keeps Postgres doing the same TOAST read internally, but only the users array
+  // (a few KB) crosses the wire and gets parsed here.
   const sql = getSql();
-  const rows = await sql`select data from app_state where key = ${key} limit 1`;
-  const state = rows[0]?.data || {};
-  const users = Array.isArray(state.users) ? state.users : [];
+  const rows = await sql`select data -> 'users' as users from app_state where key = ${key} limit 1`;
+  const users = Array.isArray(rows[0]?.users) ? rows[0].users : [];
   const hasValidMaster = users.some(item => item && item.role === "master_admin" && item.status !== "disabled" && String(item.email || "").trim());
   const matchedUser = users.find(item => String(item.email || "").trim().toLowerCase() === email);
   if (matchedUser && matchedUser.status === "disabled") {
