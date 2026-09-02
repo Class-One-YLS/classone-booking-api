@@ -81,7 +81,7 @@ async function requireWritePermission(req, res, key, incomingData = null, authBo
   return true;
 }
 
-function splitText(text, chunkSize = 350000) {
+function splitText(text, chunkSize = 2000000) {
   const chunks = [];
   for (let index = 0; index < text.length; index += chunkSize) {
     chunks.push(text.slice(index, index + chunkSize));
