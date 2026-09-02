@@ -81,7 +81,16 @@ async function requireWritePermission(req, res, key, incomingData = null, authBo
   return true;
 }
 
-function splitText(text, chunkSize = 350000) {
+// Chunk size for READS. Each chunk is one HTTP round trip from the client, and per-request overhead
+// (auth, DB connection, cache lookup) measured ~1-1.2s even for a fully-cached chunk -- so round-trip
+// COUNT, not payload size, is the dominant cost once the composed_state_chunk_cache is warm (see the
+// comment above this function for the cache itself). At the old 350KB size, a ~24MB composed state
+// split into ~68 chunks; downloaded 6-at-a-time (NEON_CHUNK_DOWNLOAD_CONCURRENCY in index.html) that's
+// ~12 sequential batches, each paying the ~1.2s fixed cost -- 14s+ just in round trips, reported
+// 2026-09-02 as "Loading your workspace..." taking extremely long. Raising this to 2MB cuts the same
+// state to ~12 chunks (~2 batches), well under Vercel's response size limit for a single function
+// response. Keep this in sync with NEON_CHUNK_DOWNLOAD_CONCURRENCY in index.html if either changes.
+function splitText(text, chunkSize = 2000000) {
   const chunks = [];
   for (let index = 0; index < text.length; index += chunkSize) {
     chunks.push(text.slice(index, index + chunkSize));
