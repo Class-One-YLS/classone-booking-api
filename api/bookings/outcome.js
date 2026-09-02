@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
-const { ensureCoreTables, getPool } = require("../../lib/db");
-const { dateOnly, loadComposedState, stateKey, timeOnly } = require("../../lib/composed-state");
+const { ensureCoreTables, getPool, getSql } = require("../../lib/db");
+const { dateOnly, stateKey, timeOnly } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 const ALLOWED_OUTCOMES = new Set(["cancelled", "completed", "student_not_show", "teacher_leave", "public_holiday", "booked", "restore"]);
@@ -232,10 +232,19 @@ async function handleOutcome(req, res) {
   if (!bookingId || !booking) return sendJson(res, 400, { ok: false, error: "bookingId and booking are required." });
   if (!ALLOWED_OUTCOMES.has(outcome)) return sendJson(res, 400, { ok: false, error: "Unsupported booking outcome for delta sync." });
 
-  const composed = await loadComposedState(key, { backfill: true });
-  markOutcomeTrace(trace, "composed state loaded");
+  // Only ever needed .data.users/.data.roles for the permission check below -- but
+  // loadComposedState(key, {backfill:true}) doesn't just read those; {backfill:true} walks every
+  // booking AND every teacher's regularSlots/overrideSlots and does one SELECT + one INSERT/UPDATE
+  // per record against recurring_assignments_v2/booking_records_v2 (thousands of sequential DB round
+  // trips for this project's data). Running that on every single booking-outcome save (cancel,
+  // complete, etc.) is what caused "took too long to respond" / sync-failed timeouts reported
+  // 2026-09-02. A plain legacy-blob read of just the users/roles fields is enough for userCanWrite().
+  const permissionSql = getSql();
+  const permissionRows = await permissionSql`select data -> 'users' as users, data -> 'roles' as roles from app_state where key = ${key} limit 1`;
+  const permissionState = { users: permissionRows[0]?.users || [], roles: permissionRows[0]?.roles || [] };
+  markOutcomeTrace(trace, "permission state loaded");
   const email = verifiedSessionEmail(req, body);
-  if (!userCanWrite(composed.data || {}, email)) {
+  if (!userCanWrite(permissionState, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to save booking outcomes." });
   }
   markOutcomeTrace(trace, "permission checked");
