@@ -157,7 +157,13 @@ async function handleCreate(req, res) {
   if (!booking || !bookingId) return sendJson(res, 400, { ok: false, error: "booking is required." });
   if (!booking.teacherId || !booking.date || !booking.time) return sendJson(res, 400, { ok: false, error: "teacherId, date and time are required." });
 
-  const composed = await loadComposedState(key, { backfill: true });
+  // Not {backfill:true}: that option walks every booking and every teacher's regularSlots/
+  // overrideSlots doing one SELECT + one INSERT/UPDATE per record against the normalized tables --
+  // a one-time/occasional migration concern, not something a routine booking create needs to pay for
+  // on every call. This still needs the live-merged composed.data.bookings for the conflict check
+  // below, so unlike the permission-only checks in outcome.js/upsert.js this keeps the full
+  // loadComposedState() read; it just skips the expensive backfill loops.
+  const composed = await loadComposedState(key);
   const email = verifiedSessionEmail(req, body);
   if (!userCanWrite(composed.data || {}, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to create bookings." });
