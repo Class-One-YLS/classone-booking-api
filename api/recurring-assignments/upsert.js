@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
-const { ensureCoreTables, getPool } = require("../../lib/db");
-const { loadComposedState, normalizeRecurringAssignment, stateKey, timeOnly } = require("../../lib/composed-state");
+const { ensureCoreTables, getPool, getSql } = require("../../lib/db");
+const { normalizeRecurringAssignment, stateKey, timeOnly } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 function normalizedEmail(value) {
@@ -142,9 +142,14 @@ async function handleUpsert(req, res) {
   if (!requestId) return sendJson(res, 400, { ok: false, error: "requestId is required." });
   if (!assignments.length) return sendJson(res, 400, { ok: false, error: "assignment is required." });
 
-  const composed = await loadComposedState(key, { backfill: true });
+  // See api/bookings/outcome.js for why this isn't loadComposedState(key, {backfill:true}) anymore:
+  // that option walks every booking and every teacher's regularSlots/overrideSlots doing one SELECT +
+  // one INSERT/UPDATE per record, just to answer a permission check that only needs users/roles.
+  const permissionSql = getSql();
+  const permissionRows = await permissionSql`select data -> 'users' as users, data -> 'roles' as roles from app_state where key = ${key} limit 1`;
+  const permissionState = { users: permissionRows[0]?.users || [], roles: permissionRows[0]?.roles || [] };
   const email = verifiedSessionEmail(req, body);
-  if (!userCanWrite(composed.data || {}, email)) {
+  if (!userCanWrite(permissionState, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to save recurring assignments." });
   }
 
