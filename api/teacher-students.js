@@ -1,4 +1,4 @@
-const { getSql, ensureCoreTables } = require("../lib/db");
+const { getSql, getPool, ensureCoreTables } = require("../lib/db");
 const { setCors, sendJson, handleOptions, readJson, safeError } = require("../lib/http");
 
 function stateKey(req, body) {
@@ -14,8 +14,8 @@ function studentNoteId(teacherId, studentId, studentName) {
   return `teacher_student_${teacherId}_${key || "student"}`.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-function findTeacher(state, teacherId) {
-  return (Array.isArray(state.teachers) ? state.teachers : []).find(teacher => teacher.id === teacherId) || null;
+function findTeacher(teachers, teacherId) {
+  return (Array.isArray(teachers) ? teachers : []).find(teacher => teacher.id === teacherId) || null;
 }
 
 function hasTeacherToken(token, teacher) {
@@ -23,43 +23,52 @@ function hasTeacherToken(token, teacher) {
   return Boolean(saved && String(token || "").trim() === saved);
 }
 
-async function loadState(key) {
+// Previously this endpoint called loadState()/saveState() which read the ENTIRE app_state.data blob
+// (the whole legacy state -- tens of MB) just to look up one teacher for token validation, then wrote
+// the WHOLE modified blob back on every single note save. For a state this size that read+rewrite is
+// slow enough to trip Postgres/Neon connection termination ("Student note save failed: terminated",
+// reported 2026-09-03), on top of being wasteful for something that only ever touches one small
+// teacherStudentNotes record. This now does a lightweight read of just data->'teachers' for the token
+// check, and writes the note directly into collection_records_v2 (the same normalized per-record
+// table api/records/transaction.js already uses for this same "teacherStudentNotes" collection) --
+// loadComposedState() merges that table back into data.teacherStudentNotes on every read, so this
+// stays consistent with the admin app without ever touching the big legacy blob.
+async function loadTeachersForTokenCheck(key) {
   await ensureCoreTables();
   const sql = getSql();
-  const rows = await sql`
-    select key, data, version
-    from app_state
-    where key = ${key}
-    limit 1
-  `;
-  return rows[0] || null;
+  const rows = await sql`select data -> 'teachers' as teachers from app_state where key = ${key} limit 1`;
+  return Array.isArray(rows[0]?.teachers) ? rows[0].teachers : null;
 }
 
-async function saveState(key, data, updatedBy) {
-  const sql = getSql();
-  const rows = await sql`
-    update app_state
-    set data = ${JSON.stringify(data)}::jsonb,
-        version = app_state.version + 1,
-        updated_at = now(),
-        updated_by = ${updatedBy}
-    where key = ${key}
-    returning key, version, updated_at, updated_by
-  `;
-  if (!rows.length) throw new Error("State not found.");
-  await sql`delete from app_state_text_chunks where state_key = ${key}`;
-  await sql`
-    insert into audit_logs (action, entity_type, entity_id, summary, after_data, created_by)
-    values (
-      'teacher_student_note_saved',
-      'teacher_student_note',
-      ${key},
-      ${`Teacher student notes saved for ${updatedBy}`},
-      ${JSON.stringify({ version: Number(rows[0].version || 0) })}::jsonb,
-      ${updatedBy}
-    )
-  `;
-  return rows[0];
+function recordTime(record) {
+  return Math.max(
+    Date.parse(record?.lastUpdatedAt || "") || 0,
+    Date.parse(record?.updatedAt || "") || 0,
+    Date.parse(record?.createdAt || "") || 0
+  );
+}
+
+async function upsertTeacherStudentNote(client, key, record) {
+  const id = String(record.id || "").trim();
+  if (!id) throw new Error("Note id is required.");
+  const current = await client.query(
+    "select data, record_version from collection_records_v2 where state_key = $1 and collection_name = $2 and record_id = $3 for update",
+    [key, "teacherStudentNotes", id]
+  );
+  const existing = current.rows[0]?.data || null;
+  if (existing && recordTime(existing) > recordTime(record)) return existing;
+  const nextVersion = Number(current.rows[0]?.record_version || 0) + 1;
+  const data = { ...(existing || {}), ...record, id, recordVersion: nextVersion };
+  await client.query(
+    `insert into collection_records_v2 (state_key, collection_name, record_id, record_version, data)
+     values ($1,$2,$3,$4,$5::jsonb)
+     on conflict (state_key, collection_name, record_id) do update
+     set record_version = excluded.record_version,
+         data = excluded.data,
+         updated_at = now()`,
+    [key, "teacherStudentNotes", id, nextVersion, JSON.stringify(data)]
+  );
+  return data;
 }
 
 module.exports = async function handler(req, res) {
@@ -70,50 +79,92 @@ module.exports = async function handler(req, res) {
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "Method not allowed." });
     const body = await readJson(req);
     const key = stateKey(req, body);
-    const row = await loadState(key);
-    if (!row || !row.data) return sendJson(res, 404, { ok: false, error: "Timetable data is not ready yet." });
+    const teachers = await loadTeachersForTokenCheck(key);
+    if (!teachers) return sendJson(res, 404, { ok: false, error: "Timetable data is not ready yet." });
 
-    const state = row.data || {};
     const teacherId = String(body.teacherId || "").trim();
-    const teacher = findTeacher(state, teacherId);
+    const teacher = findTeacher(teachers, teacherId);
     if (!teacher) return sendJson(res, 404, { ok: false, error: "Teacher not found." });
     if (!hasTeacherToken(body.token, teacher)) return sendJson(res, 401, { ok: false, error: "Invalid teacher link token." });
 
     const records = Array.isArray(body.records) ? body.records : [];
-    state.teacherStudentNotes = Array.isArray(state.teacherStudentNotes) ? state.teacherStudentNotes : [];
     const now = new Date().toISOString();
-    records.forEach(record => {
-      const studentId = String(record.studentId || "").trim();
-      const studentName = cleanStudentName(record.studentName || "");
-      if (!studentId && !studentName) return;
-      const id = studentNoteId(teacherId, studentId, studentName);
-      let note = state.teacherStudentNotes.find(item =>
-        item.id === id ||
-        (item.teacherId === teacherId && studentId && item.studentId === studentId) ||
-        (item.teacherId === teacherId && !studentId && cleanStudentName(item.studentName).toLowerCase() === studentName.toLowerCase())
-      );
-      if (!note) {
-        note = { id, teacherId, studentId, studentName, createdAt: now };
-        state.teacherStudentNotes.push(note);
-      }
-      note.id = id;
-      note.teacherId = teacherId;
-      note.studentId = studentId;
-      note.studentName = studentName || note.studentName || "";
-      note.currentLevel = String(record.currentLevel || "").slice(0, 200);
-      note.remark = String(record.remark || "").slice(0, 3000);
-      note.archived = Boolean(record.archived);
-      note.lastUpdatedAt = now;
-      note.lastUpdatedBy = teacher.name || "Teacher";
-    });
+    const preparedRecords = records
+      .map(record => {
+        const studentId = String(record.studentId || "").trim();
+        const studentName = cleanStudentName(record.studentName || "");
+        if (!studentId && !studentName) return null;
+        const id = studentNoteId(teacherId, studentId, studentName);
+        return {
+          id,
+          teacherId,
+          studentId,
+          studentName,
+          currentLevel: String(record.currentLevel || "").slice(0, 200),
+          remark: String(record.remark || "").slice(0, 3000),
+          archived: Boolean(record.archived),
+          createdAt: record.createdAt || now,
+          lastUpdatedAt: now,
+          lastUpdatedBy: teacher.name || "Teacher"
+        };
+      })
+      .filter(Boolean);
 
-    const saved = await saveState(key, state, `Teacher: ${teacher.name || teacherId}`);
+    const pool = getPool();
+    const client = await pool.connect();
+    let saved = [];
+    let versionRow = null;
+    try {
+      await client.query("begin");
+      saved = [];
+      for (const record of preparedRecords) {
+        saved.push(await upsertTeacherStudentNote(client, key, record));
+      }
+      const versionRows = await client.query(
+        `insert into system_versions (state_key, version, updated_at)
+         values (
+           $1,
+           greatest(
+             0,
+             coalesce((select version from system_versions where state_key = $1), 0),
+             coalesce((select version from app_state where key = $1), 0)
+           ) + 1,
+           now()
+         )
+         on conflict (state_key) do update
+         set version = greatest(
+               system_versions.version,
+               coalesce((select version from app_state where key = $1), 0)
+             ) + 1,
+             updated_at = now()
+         returning version, updated_at`,
+        [key]
+      );
+      versionRow = versionRows.rows[0];
+      await client.query(
+        `insert into audit_logs (action, entity_type, entity_id, summary, after_data, created_by)
+         values ('teacher_student_note_saved', 'teacher_student_note', $1, $2, $3::jsonb, $4)`,
+        [
+          key,
+          `Teacher student notes saved for Teacher: ${teacher.name || teacherId}`,
+          JSON.stringify({ version: Number(versionRow.version || 0), noteCount: saved.length }),
+          `Teacher: ${teacher.name || teacherId}`
+        ]
+      );
+      await client.query("commit");
+    } catch (error) {
+      try { await client.query("rollback"); } catch (rollbackError) {}
+      throw error;
+    } finally {
+      client.release();
+    }
+
     return sendJson(res, 200, {
       ok: true,
-      key: saved.key,
-      version: Number(saved.version || 0),
-      updatedAt: saved.updated_at,
-      updatedBy: saved.updated_by || null
+      key,
+      version: Number(versionRow?.version || 0),
+      updatedAt: versionRow?.updated_at || now,
+      updatedBy: `Teacher: ${teacher.name || teacherId}`
     });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: safeError(error) });
