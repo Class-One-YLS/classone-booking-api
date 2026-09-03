@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
-const { ensureCoreTables, getPool, getSql } = require("../../lib/db");
-const { dateOnly, stateKey, timeOnly } = require("../../lib/composed-state");
+const { ensureCoreTables, getPool } = require("../../lib/db");
+const { dateOnly, stateKey, timeOnly, loadUsersAndRolesForPermissionCheck } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 const ALLOWED_OUTCOMES = new Set(["cancelled", "completed", "student_not_show", "teacher_leave", "public_holiday", "booked", "restore"]);
@@ -238,10 +238,12 @@ async function handleOutcome(req, res) {
   // per record against recurring_assignments_v2/booking_records_v2 (thousands of sequential DB round
   // trips for this project's data). Running that on every single booking-outcome save (cancel,
   // complete, etc.) is what caused "took too long to respond" / sync-failed timeouts reported
-  // 2026-09-02. A plain legacy-blob read of just the users/roles fields is enough for userCanWrite().
-  const permissionSql = getSql();
-  const permissionRows = await permissionSql`select data -> 'users' as users, data -> 'roles' as roles from app_state where key = ${key} limit 1`;
-  const permissionState = { users: permissionRows[0]?.users || [], roles: permissionRows[0]?.roles || [] };
+  // 2026-09-02. loadUsersAndRolesForPermissionCheck() reads just users/roles (still cheap) but ALSO
+  // merges in users/roles created or edited through the newer collection_records_v2 path -- a plain
+  // legacy-blob-only read (the first version of this fix) missed those, so a user who only exists
+  // there would get "You do not have permission" even with a fully valid session (see
+  // loadUsersAndRolesForPermissionCheck's comment: the same gap broke login for Kelvin, 2026-09-03).
+  const permissionState = await loadUsersAndRolesForPermissionCheck(key);
   markOutcomeTrace(trace, "permission state loaded");
   const email = verifiedSessionEmail(req, body);
   if (!userCanWrite(permissionState, email)) {
