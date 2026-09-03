@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
-const { getSql, ensureCoreTables } = require("../lib/db");
+const { ensureCoreTables } = require("../lib/db");
+const { loadUsersAndRolesForPermissionCheck } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../lib/http");
 
 function stateKey(req, body) {
@@ -35,12 +36,12 @@ async function login(req, res) {
   // Login only needs the users array to check credentials, but app_state.data is one JSONB blob
   // holding the entire app state (activity logs, bookings, etc.) — currently 50MB+. Selecting the
   // whole column on every sign-in attempt pulls all of that over the wire and JSON-parses it just to
-  // read a few user records, which is slow and burns Neon data-transfer for nothing. Extracting the
-  // "users" path in SQL keeps Postgres doing the same TOAST read internally, but only the users array
-  // (a few KB) crosses the wire and gets parsed here.
-  const sql = getSql();
-  const rows = await sql`select data -> 'users' as users from app_state where key = ${key} limit 1`;
-  const users = Array.isArray(rows[0]?.users) ? rows[0].users : [];
+  // read a few user records, which is slow and burns Neon data-transfer for nothing.
+  // loadUsersAndRolesForPermissionCheck() extracts just the users (a few KB) -- and also merges in
+  // any users created/edited through the newer collection_records_v2 "users" sync path, which the
+  // legacy app_state.data.users field alone doesn't see (see that function's comment: a user who only
+  // ever exists there could never log in otherwise, e.g. Kelvin, 2026-09-03).
+  const { users } = await loadUsersAndRolesForPermissionCheck(key);
   const hasValidMaster = users.some(item => item && item.role === "master_admin" && item.status !== "disabled" && String(item.email || "").trim());
   const matchedUser = users.find(item => String(item.email || "").trim().toLowerCase() === email);
   if (matchedUser && matchedUser.status === "disabled") {
