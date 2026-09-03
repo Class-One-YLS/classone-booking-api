@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { getSql, ensureCoreTables } = require("../lib/db");
+const { loadUsersAndRolesForPermissionCheck } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../lib/http");
 
 const BUSINESS_COLLECTIONS = [
@@ -336,12 +337,18 @@ async function applyPatch(req, res) {
   const currentState = rows.length ? (rows[0].data || {}) : {};
   const currentVersion = rows.length ? Number(rows[0].version || 0) : 0;
   const email = verifiedSessionEmail(req, body);
-  if (!userCanWrite(currentState, email)) {
+  // userCanWrite/userCanManageUsers check against loadUsersAndRolesForPermissionCheck()'s merged
+  // users/roles, not currentState.users/.roles directly -- currentState is the raw legacy blob, which
+  // doesn't see a user only created/edited through the newer collection_records_v2 "users" sync path
+  // (see that function's comment: the same gap broke login for Kelvin, 2026-09-03, and would equally
+  // deny a valid save here with "You do not have permission" for such a user). currentState itself is
+  // still used unmodified below for the actual patch merge.
+  const permissionState = await loadUsersAndRolesForPermissionCheck(key);
+  if (!userCanWrite(permissionState, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to save changes." });
   }
-  if (usersOrRolesPatched(patch) && !userCanManageUsers(currentState, email)) {
+  if (usersOrRolesPatched(patch) && !userCanManageUsers(permissionState, email)) {
     return sendJson(res, 403, { ok: false, error: "Only master_admin can manage users and roles." });
-  }
 
   const merged = mergePatchIntoState(currentState, patch);
   merged.activityLogs = trimActivityLogUndoHistory(merged.activityLogs);
