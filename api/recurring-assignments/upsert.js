@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
-const { ensureCoreTables, getPool, getSql } = require("../../lib/db");
-const { normalizeRecurringAssignment, stateKey, timeOnly } = require("../../lib/composed-state");
+const { ensureCoreTables, getPool } = require("../../lib/db");
+const { normalizeRecurringAssignment, stateKey, timeOnly, loadUsersAndRolesForPermissionCheck } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 function normalizedEmail(value) {
@@ -145,9 +145,9 @@ async function handleUpsert(req, res) {
   // See api/bookings/outcome.js for why this isn't loadComposedState(key, {backfill:true}) anymore:
   // that option walks every booking and every teacher's regularSlots/overrideSlots doing one SELECT +
   // one INSERT/UPDATE per record, just to answer a permission check that only needs users/roles.
-  const permissionSql = getSql();
-  const permissionRows = await permissionSql`select data -> 'users' as users, data -> 'roles' as roles from app_state where key = ${key} limit 1`;
-  const permissionState = { users: permissionRows[0]?.users || [], roles: permissionRows[0]?.roles || [] };
+  // loadUsersAndRolesForPermissionCheck() also merges in users/roles synced through the newer
+  // collection_records_v2 path, which a legacy-blob-only read would miss (see its comment).
+  const permissionState = await loadUsersAndRolesForPermissionCheck(key);
   const email = verifiedSessionEmail(req, body);
   if (!userCanWrite(permissionState, email)) {
     return sendJson(res, 403, { ok: false, error: "You do not have permission to save recurring assignments." });
