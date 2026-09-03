@@ -1,4 +1,5 @@
 const { ensureCoreTables, getPool } = require("../../lib/db");
+const { loadUsersAndRolesForPermissionCheck } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 function stateKey(req, body) {
@@ -76,7 +77,13 @@ async function handlePrune(req, res) {
     const currentState = currentRows.rows[0].data || {};
     const currentVersion = Number(currentRows.rows[0].version || 0);
     const email = verifiedSessionEmail(req, body);
-    if (!userCanWrite(currentState, email)) {
+    // Checked against loadUsersAndRolesForPermissionCheck()'s merged users/roles, not currentState
+    // directly -- see that function's comment: a user only created/edited through the newer
+    // collection_records_v2 "users" path wouldn't be found in currentState.users alone (the same gap
+    // broke login for Kelvin, 2026-09-03). currentState itself is still used unmodified below for the
+    // actual legacy activityLogs prune.
+    const permissionState = await loadUsersAndRolesForPermissionCheck(key);
+    if (!userCanWrite(permissionState, email)) {
       await client.query("rollback");
       return sendJson(res, 403, { ok: false, error: "You do not have permission to delete activity log history." });
     }
