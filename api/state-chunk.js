@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 const { getSql, ensureCoreTables } = require("../lib/db");
-const { loadComposedState } = require("../lib/composed-state");
+const { loadComposedState, loadUsersAndRolesForPermissionCheck } = require("../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../lib/http");
 
 function stateKey(req, body) {
@@ -70,11 +70,17 @@ async function requireWritePermission(req, res, key, incomingData = null, authBo
   if (!rows.length) return true;
   const current = rows[0].data || {};
   const email = verifiedSessionEmail(req, authBody);
-  if (!userCanWrite(current, email)) {
+  // userCanWrite/userCanManageUsers check against loadUsersAndRolesForPermissionCheck()'s merged
+  // users/roles, not `current` directly -- see that function's comment: a user only created/edited
+  // through the newer collection_records_v2 "users" path wouldn't be found in `current.users` alone
+  // (the same gap broke login for Kelvin, 2026-09-03). usersOrRolesChanged() below still compares
+  // against `current`/`incomingData` as before -- that's a different, unrelated check.
+  const permissionState = await loadUsersAndRolesForPermissionCheck(key);
+  if (!userCanWrite(permissionState, email)) {
     sendJson(res, 403, { ok: false, error: "You do not have permission to save changes." });
     return false;
   }
-  if (usersOrRolesChanged(current, incomingData) && !userCanManageUsers(current, email)) {
+  if (usersOrRolesChanged(current, incomingData) && !userCanManageUsers(permissionState, email)) {
     sendJson(res, 403, { ok: false, error: "Only master_admin can manage users and roles." });
     return false;
   }
