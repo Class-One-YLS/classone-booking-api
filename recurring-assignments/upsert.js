@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
-const { ensureCoreTables, getPool } = require("../../lib/db");
-const { normalizeRecurringAssignment, stateKey, timeOnly, loadUsersAndRolesForPermissionCheck } = require("../../lib/composed-state");
+const { ensureCoreTables, getPool, getSql } = require("../../lib/db");
+const { normalizeRecurringAssignment, stateKey, timeOnly } = require("../../lib/composed-state");
 const { setCors, sendJson, handleOptions, requireApiKey, readJson, safeError } = require("../../lib/http");
 
 function normalizedEmail(value) {
