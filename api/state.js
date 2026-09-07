@@ -84,6 +84,7 @@ async function requireWritePermission(req, res, key, incomingData = null, authBo
   if (usersOrRolesChanged(current, incomingData) && !userCanManageUsers(permissionState, email)) {
     sendJson(res, 403, { ok: false, error: "Only master_admin can manage users and roles." });
     return false;
+  }
   return true;
 }
 
