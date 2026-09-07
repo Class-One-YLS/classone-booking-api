@@ -349,6 +349,7 @@ async function applyPatch(req, res) {
   }
   if (usersOrRolesPatched(patch) && !userCanManageUsers(permissionState, email)) {
     return sendJson(res, 403, { ok: false, error: "Only master_admin can manage users and roles." });
+  }
 
   const merged = mergePatchIntoState(currentState, patch);
   merged.activityLogs = trimActivityLogUndoHistory(merged.activityLogs);
