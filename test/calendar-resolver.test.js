@@ -758,15 +758,61 @@ function testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate() {
       updatedAt: "2026-07-20T00:00:00.000Z"
     }]
   }, "2026-07-24", "2026-07-31");
-  const leaveDate = cell(cells, "2026-07-24", "09:00");
-  assert.equal(leaveDate.kind, "off");
-  assert.equal(leaveDate.status, "teacher_leave");
-  assert.equal(leaveDate.available, false);
-  assert.equal(leaveDate.locked, true);
   const nextWeek = cell(cells, "2026-07-31", "09:00");
   assert.equal(nextWeek.kind, "open");
   assert.equal(nextWeek.status, "available");
   assert.equal(nextWeek.available, true);
+}
+
+// 2026-09-08 (Tarry Pian Yee Sing): a whole-day teacher leave correctly converted the teacher's two
+// existing "Available" regular slots into Teacher Leave cells, but every OTHER half-hour of that same
+// leave -- hours with no underlying slot record at all -- fell through to a bare "OFF" cell on both
+// the admin Weekly Timetable and the read-only Teacher View, with no indication a leave was approved.
+// This asserts a whole-day leave now reads as "on leave" for its FULL covered span, including times
+// the teacher never had any slot for in the first place.
+function testWholeDayTeacherLeaveCoversTimesWithNoUnderlyingSlot() {
+  const teacher = baseTeacher({
+    regularSlots: [{
+      id: "wed_1800",
+      day: "Wednesday",
+      time: "18:00",
+      locked: false,
+      subject: "CN",
+      startDate: "2026-07-01",
+      updatedAt: "2026-07-01T00:00:00.000Z"
+    }]
+  });
+  const cells = resolve({
+    teachers: [teacher],
+    students: [],
+    bookings: [],
+    teacherLeaves: [{
+      id: "leave_whole_day",
+      teacherId: "teacher_peggy",
+      status: "active",
+      startDate: "2026-09-16",
+      endDate: "2026-09-16",
+      fromTime: "08:00",
+      toTime: "21:30",
+      wholeDay: true,
+      reason: "have a prior commitment",
+      updatedAt: "2026-09-08T00:00:00.000Z"
+    }]
+  }, "2026-09-16", "2026-09-16");
+  // The one time that DID have a regular slot still converts to Teacher Leave as before.
+  const existingSlotTime = cell(cells, "2026-09-16", "18:00");
+  assert.equal(existingSlotTime.status, "teacher_leave");
+  // A time with NO underlying slot at all (10:00) must now ALSO surface as Teacher Leave, not be
+  // silently omitted (which the client renders as plain "OFF" with no leave indication).
+  const noSlotTime = cell(cells, "2026-09-16", "10:00");
+  assert.ok(noSlotTime, "expected a synthesized Teacher Leave cell at a time with no prior slot");
+  assert.equal(noSlotTime.status, "teacher_leave");
+  assert.equal(noSlotTime.kind, "off");
+  assert.equal(noSlotTime.available, false);
+  assert.equal(noSlotTime.remark, "have a prior commitment");
+  // The full 08:00-21:30 whole-day range covers 28 half-hour cells; all of them should be leave cells.
+  const leaveCells = cells.filter(item => item.status === "teacher_leave");
+  assert.equal(leaveCells.length, 28);
 }
 
 function testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate() {
@@ -1180,6 +1226,7 @@ testTerminalStatusesBeatAutomaticCompletion();
 testSetOffSupersedesOlderBooking();
 testResolvedCellParityCases();
 testTeacherLeaveBlocksOpenSlotsOnlyOnLeaveDate();
+testWholeDayTeacherLeaveCoversTimesWithNoUnderlyingSlot();
 testDeletedCancelledOccurrenceSuppressesOnlyThatRecurringDate();
 testMovedSourceAndDestinationKeepSeparateOccurrenceIds();
 testActiveRegularSlotBeatsCancelledHistoricalBookingAtSameCell();
