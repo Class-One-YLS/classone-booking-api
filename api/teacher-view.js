@@ -636,6 +636,40 @@ function teacherLeaveForSlot(state, teacherId, date, time) {
   ) || null;
 }
 
+function timeToMinutes(value) {
+  const normalized = normalizeTime(value);
+  if (!normalized) return null;
+  const [hour, minute] = normalized.split(":").map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
+  return (hour * 60) + minute;
+}
+
+// teacherLeaveForSlot() (above) only ever gets checked against times that already have a regular or
+// override slot record -- see resolveTeacherCalendar's `times` set below. A leave's actual covered
+// range (leave.fromTime..leave.toTime, commonly the whole day 08:00-21:30 for a "whole day" leave)
+// routinely extends well past whatever slots this teacher happens to have that day, so those extra
+// half-hours were never enumerated at all and silently fell through to a generic blank/"OFF" cell on
+// this read-only Teacher View -- with no indication a leave was ever approved for that time
+// (2026-09-08, Tarry Pian Yee Sing: a whole-day leave correctly converted the two "Available" slots
+// that existed that day to Teacher Leave, but every other half-hour showed as bare OFF, same as an
+// ordinary non-working day). This enumerates every half-hour an active leave actually covers so the
+// loop below can still emit a Teacher Leave cell even where no slot ever existed for that time.
+function leaveTimesForDate(state, teacherId, dateISO) {
+  const times = new Set();
+  (state.teacherLeaves || []).forEach(leave => {
+    if (["cancelled", "undone"].includes(leave.status || "active")) return;
+    if (leave.teacherId !== teacherId) return;
+    const startDate = dateOnly(leave.startDate || leave.date);
+    const endDate = dateOnly(leave.endDate || leave.startDate || leave.date);
+    if (startDate && startDate > dateISO) return;
+    if (endDate && endDate < dateISO) return;
+    const fromMinutes = timeToMinutes(leave.fromTime) ?? 0;
+    const toMinutes = timeToMinutes(leave.toTime) ?? (23 * 60) + 30;
+    for (let minute = fromMinutes; minute <= toMinutes; minute += 30) times.add(timeFromTotalMinutes(minute));
+  });
+  return times;
+}
+
 function teacherLeaveOffSlotFromCell(slot, leave) {
   const teacherId = slot.teacherId || leave.teacherId;
   const date = dateOnly(slot.date || leave.startDate || leave.date);
@@ -792,7 +826,8 @@ function resolveTeacherCalendar(state, options = {}) {
     resolution.winners.forEach((booking, key) => {
       if (dateOnly(booking.date) === dateISO) bookingByTime.set(normalizeTime(booking.time), { booking, key });
     });
-    const times = new Set([...slotByTime.keys(), ...bookingByTime.keys()]);
+        const times = new Set([...slotByTime.keys(), ...bookingByTime.keys()]);
+    leaveTimesForDate(state, teacher.id, dateISO).forEach(time => times.add(time));
     times.forEach(time => {
       const resolved = bookingByTime.get(time);
       const booking = resolved && resolved.booking;
@@ -816,6 +851,17 @@ function resolveTeacherCalendar(state, options = {}) {
           return;
         }
         rows.push(publicCellFromSlot(slot, teacher, state));
+      } else {
+        // Neither a real slot nor a booking exists for this half-hour -- normally that's just an
+        // ordinary non-working time (no cell, client renders blank/OFF). But if an active teacher
+        // leave covers this exact time (see leaveTimesForDate above), surface it as a Teacher Leave
+        // cell anyway so a whole-day leave reads as "on leave" for its full span, not just for
+        // whatever slots happened to already exist that day.
+        const leave = teacherLeaveForSlot(state, teacher.id, dateISO, time);
+        if (leave) {
+          const syntheticSlot = { teacherId: teacher.id, date: dateISO, time, day: dayName(dateISO), subject: "" };
+          rows.push(publicCellFromSlot(teacherLeaveOffSlotFromCell(syntheticSlot, leave), teacher, state));
+        }
       }
     });
   });
